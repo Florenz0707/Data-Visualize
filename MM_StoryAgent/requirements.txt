@@ -1,0 +1,15 @@
+numpy
+tqdm
+zhon
+Pillow
+PyYAML
+pypinyin
+soundfile
+dashscope
+librosa
+moviepy
+opencv-python
+torch
+transformers
+diffusers
+git+https://github.com/aliyun/alibabacloud-nls-python-sdk@dev
