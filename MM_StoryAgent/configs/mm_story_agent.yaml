@@ -11,23 +11,10 @@ story_writer:
         main_role: "(no main role specified)"
         scene: "(no scene specified)"
 
-sound_generation:
-    tool: audioldm2_t2a
-    cfg:
-        num_turns: 3
-        device: cuda
-        sample_rate: &sample_rate 16000
-    params:
-        guidance_scale: 3.5
-        seed: 0
-        ddim_steps: 200
-        n_candidate_per_text: 3
-
-
 speech_generation:
     tool: cosyvoice_tts
     cfg:
-        sample_rate: *sample_rate
+        sample_rate: &sample_rate 16000
     params:
         voice: longyuan
 
@@ -36,24 +23,16 @@ image_generation:
     tool: story_diffusion_t2i
     cfg:
         num_turns: 3
-        model_name: stabilityai/stable-diffusion-xl-base-1.0
-        id_length: 2
+        api_type: "dashscope"  # Options: "dashscope", "openai", "stability", "replicate", "custom"
+        api_key: ""  # Will use DASHSCOPE_API_KEY from environment (set in start.bat)
+        llm: "qwen"
         height: &image_height 512
         width: &image_width 1024
     params:
         seed: 112536
-        guidance_scale: 10.0
         style_name: "Storybook" # ['(No style)', 'Japanese Anime', 'Digital/Oil Painting', 'Pixar/Disney Character', 
                                 #  'Photographic', 'Comic book', 'Line art', 'Black and White Film Noir', 'Isometric Rooms']
 
-music_generation:
-    tool: musicgen_t2m
-    cfg:
-        llm_type: qwen
-        num_turns: 3
-        device: cuda
-    params:
-        duration: 30.0
 
 video_compose:
     tool: slideshow_video_compose
@@ -75,9 +54,6 @@ video_compose:
             # stroke_width: 0.5
             max_length: 50
         slideshow_effect:
-            bg_speech_ratio: 0.6
-            sound_volume: 0.6
-            music_volume: 0.5
             fade_duration: 0.8
             slide_duration: 0.4
             zoom_speed: 0.5

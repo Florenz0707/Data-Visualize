@@ -170,3 +170,5 @@ generated_stories
 .vscode
 
 backup/
+
+start.bat

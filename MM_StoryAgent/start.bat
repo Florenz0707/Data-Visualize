@@ -1,1 +1,0 @@
-python run.py -c configs\mm_story_agent.yaml

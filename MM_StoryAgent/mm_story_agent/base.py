@@ -1,5 +1,3 @@
-from abc import ABC
-
 register_map = {
     'qwen': 'QwenAgent',
     'qa_outline_story_writer': 'QAOutlineStoryWriter',

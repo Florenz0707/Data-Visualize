@@ -12,4 +12,6 @@ opencv-python
 torch
 transformers
 diffusers
+accelerate
+hf_xet
 git+https://github.com/aliyun/alibabacloud-nls-python-sdk@dev

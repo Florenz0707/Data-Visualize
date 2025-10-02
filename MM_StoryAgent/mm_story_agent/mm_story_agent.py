@@ -1,4 +1,3 @@
-import time
 import json
 from pathlib import Path
 
@@ -12,7 +11,9 @@ from .base import init_tool_instance
 class MMStoryAgent:
 
     def __init__(self) -> None:
-        self.modalities = ["image", "sound", "speech", "music"]
+        self.modalities = [
+            "image",
+        ]
 
     def call_modality_agent(self, modality, agent, params, return_dict):
         result = agent.call(params)
@@ -65,11 +66,6 @@ class MMStoryAgent:
                     images = result["generation_results"]
                     for idx in range(len(pages)):
                         script_data["pages"][idx]["image_prompt"] = result["prompts"][idx]
-                elif modality == "sound":
-                    for idx in range(len(pages)):
-                        script_data["pages"][idx]["sound_prompt"] = result["prompts"][idx]
-                elif modality == "music":
-                    script_data["music_prompt"] = result["prompt"]
             except Exception as e:
                 print(f"Error occurred during generation: {e}")
 
@@ -79,6 +75,13 @@ class MMStoryAgent:
         return images
 
     def compose_storytelling_video(self, config, pages):
+        # Skip composing if no speech assets exist
+        story_dir = Path(config["story_dir"]) if not isinstance(config["story_dir"], Path) else config["story_dir"]
+        speech_dir = story_dir / "speech"
+        if not speech_dir.exists() or not any(speech_dir.glob("*.wav")):
+            print("No speech assets found. Skipping video composition.")
+            return
+
         video_compose_agent = init_tool_instance(config["video_compose"])
         params = config["video_compose"]["params"].copy()
         params["pages"] = pages
