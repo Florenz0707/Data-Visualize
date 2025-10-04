@@ -172,3 +172,6 @@ generated_stories
 backup/
 
 start.bat
+resume.bat
+
+test/

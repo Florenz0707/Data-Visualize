@@ -121,51 +121,68 @@ class StoryDiffusionAgent:
             # Set API key
             dashscope.api_key = api_key
             
-            images = []
-            
-            for prompt in prompts:
-                try:
-                    # Call DashScope image generation API
-                    rsp = ImageSynthesis.call(
-                        model=ImageSynthesis.Models.wanx_v1,  # 通义万相模型
-                        prompt=prompt,
-                        n=1,
-                        size=f'{width}*{height}' if width == height else '1024*1024'  # DashScope 支持的尺寸
-                    )
-                    
-                    if rsp.status_code == 200 and rsp.output and rsp.output.results:
-                        # Get image URL from response
-                        image_url = rsp.output.results[0].url
-                        
-                        # Download image
-                        image_response = requests.get(image_url)
-                        image = Image.open(io.BytesIO(image_response.content))
-                        
-                        # Resize if needed
-                        if image.size != (width, height):
-                            image = image.resize((width, height), Image.Resampling.LANCZOS)
-                        
-                        images.append(image)
-                        print(f"Successfully generated image with DashScope API")
-                        
-                    else:
-                        print(f"DashScope API error: {rsp.status_code}, {rsp.message}")
-                        images.append(self._create_placeholder_image(width, height))
-                    
-                    time.sleep(1)  # Rate limiting
-                    
-                except Exception as e:
-                    print(f"Error generating image with DashScope API: {e}")
-                    images.append(self._create_placeholder_image(width, height))
+            # Use serial processing for image generation (API rate limit compliance)
+            images = self._generate_images_serial(prompts, width, height, api_key)
             
             return images
             
         except ImportError:
             print("Warning: dashscope package not installed. Install with: pip install dashscope")
             return self._create_placeholder_images(len(prompts), width, height)
-        except Exception as e:
-            print(f"Error with DashScope API: {e}")
-            return self._create_placeholder_images(len(prompts), width, height)
+
+    def _generate_images_serial(self, prompts: List[str], width: int, height: int, api_key: str):
+        """Generate images serially to comply with API rate limits"""
+        import dashscope
+        from dashscope import ImageSynthesis
+        from PIL import Image
+        import requests
+        import io
+        import time
+        
+        dashscope.api_key = api_key
+        images = []
+        
+        print(f"Starting serial image generation for {len(prompts)} images...")
+        
+        for idx, prompt in enumerate(prompts):
+            try:
+                # Call DashScope image generation API
+                rsp = ImageSynthesis.call(
+                    model=ImageSynthesis.Models.wanx_v1,
+                    prompt=prompt,
+                    n=1,
+                    size=f'{width}*{height}' if width == height else '1024*1024'
+                )
+                
+                if rsp.status_code == 200 and rsp.output and rsp.output.results:
+                    # Get image URL from response
+                    image_url = rsp.output.results[0].url
+                    
+                    # Download image
+                    image_response = requests.get(image_url)
+                    image = Image.open(io.BytesIO(image_response.content))
+                    
+                    # Resize if needed
+                    if image.size != (width, height):
+                        image = image.resize((width, height), Image.Resampling.LANCZOS)
+                    
+                    images.append(image)
+                    print(f"Successfully generated image {idx + 1}/{len(prompts)} with DashScope API")
+                    
+                else:
+                    print(f"DashScope API error for image {idx + 1}: {rsp.status_code}, {rsp.message}")
+                    images.append(self._create_placeholder_image(width, height))
+                
+                # Rate limiting: wait between requests to comply with API limits
+                time.sleep(2)  # 2 seconds between requests (QPS limit: 0.5 per second)
+                
+            except Exception as e:
+                print(f"Error generating image {idx + 1} with DashScope API: {e}")
+                images.append(self._create_placeholder_image(width, height))
+                time.sleep(2)  # Still wait even on error
+        
+        print(f"Completed image generation: {len(images)} images total")
+        return images
 
     def _generate_with_openai_api(self, prompts: List[str], width: int, height: int, api_key: str):
         """Generate images using OpenAI DALL-E API"""

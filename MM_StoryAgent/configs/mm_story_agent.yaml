@@ -16,7 +16,7 @@ speech_generation:
     cfg:
         sample_rate: &sample_rate 16000
     params:
-        voice: longyuan
+        voice: xiaoyun
 
 
 image_generation:
@@ -26,8 +26,9 @@ image_generation:
         api_type: "dashscope"  # Options: "dashscope", "openai", "stability", "replicate", "custom"
         api_key: ""  # Will use DASHSCOPE_API_KEY from environment (set in start.bat)
         llm: "qwen"
-        height: &image_height 512
-        width: &image_width 1024
+        height: &image_height 720
+        width: &image_width 1280
+        # Serial processing to comply with DashScope API rate limits (QPS: 0.5, concurrent: 1)
     params:
         seed: 112536
         style_name: "Storybook" # ['(No style)', 'Japanese Anime', 'Digital/Oil Painting', 'Pixar/Disney Character', 
@@ -42,9 +43,9 @@ video_compose:
         height: *image_height
         width: *image_width
         story_dir: *story_dir
-        fps: 8
-        audio_sample_rate: *sample_rate
-        audio_codec: mp3
+        fps: 24
+        audio_sample_rate: 44100
+        audio_codec: aac
         caption:
             font: resources/font/msyh.ttf
             # bg_color: LightGrey
@@ -53,6 +54,8 @@ video_compose:
             # stroke_color: white
             # stroke_width: 0.5
             max_length: 50
+            workers: 4  # parallel TextClip render threads for subtitles
+        # enable_captions: true  # Enable captions (default)
         slideshow_effect:
             fade_duration: 0.8
             slide_duration: 0.4
