@@ -33,6 +33,23 @@ class MMStoryAgent:
         for sub_dir in self.modalities:
             (story_dir / sub_dir).mkdir(exist_ok=True, parents=True)
 
+        # 预先进行文本切分
+        print("开始文本切分...")
+        from mm_story_agent.video_compose_agent import split_text_for_speech
+        segmented_pages = []
+        for idx, page in enumerate(pages):
+            print(f"切分页面 {idx + 1}: {page[:100]}{'...' if len(page) > 100 else ''}")
+            text_segments = split_text_for_speech(page, max_words=20)
+            segmented_pages.append(text_segments)
+            print(f"  切分为 {len(text_segments)} 段")
+            for i, segment in enumerate(text_segments):
+                word_count = len(segment.split())
+                print(f"    段 {i+1}: {segment[:50]}{'...' if len(segment) > 50 else ''} ({word_count} 单词)")
+        
+        # 将切分结果保存到脚本数据中
+        script_data["segmented_pages"] = segmented_pages
+        print(f"文本切分完成，共 {len(segmented_pages)} 个页面")
+
         agents = {}
         params = {}
         for modality in self.modalities:
@@ -42,6 +59,10 @@ class MMStoryAgent:
                 "pages": pages,
                 "save_path": story_dir / modality
             })
+            
+            # 为语音生成提供切分后的页面
+            if modality == "speech":
+                params[modality]["segmented_pages"] = segmented_pages
 
         processes = []
         return_dict = mp.Manager().dict()
@@ -68,18 +89,16 @@ class MMStoryAgent:
                     for idx in range(len(pages)):
                         script_data["pages"][idx]["image_prompt"] = result["prompts"][idx]
                 elif modality == "speech":
-                    # Speech generation results are already saved to files
-                    # No additional processing needed for script_data
-                    print(f"Speech generation completed for {len(pages)} pages")
+                    print(f"Speech generation completed for {len(pages)} pages using pre-segmented text")
             except Exception as e:
                 print(f"Error occurred during generation: {e}")
 
         with open(story_dir / "script_data.json", "w") as writer:
             json.dump(script_data, writer, ensure_ascii=False, indent=4)
 
-        return images
+        return images, segmented_pages
 
-    def compose_storytelling_video(self, config, pages):
+    def compose_storytelling_video(self, config, pages, segmented_pages=None):
         # Skip composing if no speech assets exist
         story_dir = Path(config["story_dir"]) if not isinstance(config["story_dir"], Path) else config["story_dir"]
         speech_dir = story_dir / "speech"
@@ -87,15 +106,30 @@ class MMStoryAgent:
             print("No speech assets found. Skipping video composition.")
             return
 
+        # 如果没有提供切分后的页面信息，尝试从脚本数据中读取
+        if segmented_pages is None:
+            script_data_path = story_dir / "script_data.json"
+            if script_data_path.exists():
+                try:
+                    with open(script_data_path, "r", encoding="utf-8") as f:
+                        script_data = json.load(f)
+                    segmented_pages = script_data.get("segmented_pages", None)
+                    if segmented_pages:
+                        print(f"Loaded segmented pages from script data: {len(segmented_pages)} pages")
+                except Exception as e:
+                    print(f"Error loading script data: {e}")
+
         video_compose_agent = init_tool_instance(config["video_compose"])
         params = config["video_compose"]["params"].copy()
         params["pages"] = pages
+        if segmented_pages:
+            params["segmented_pages"] = segmented_pages
         video_compose_agent.call(params)
 
     def call(self, config):
         pages = self.write_story(config)
-        images = self.generate_modality_assets(config, pages)
-        self.compose_storytelling_video(config, pages)
+        images, segmented_pages = self.generate_modality_assets(config, pages)
+        self.compose_storytelling_video(config, pages, segmented_pages)
 
     def resume_from_video_composition(self, config):
         """Resume from video composition stage, skipping story/speech/image generation"""
@@ -129,4 +163,6 @@ class MMStoryAgent:
             print("Warning: No image files found")
         
         print("Starting video composition...")
-        self.compose_storytelling_video(config, pages)
+        # 从脚本数据中获取切分后的页面信息
+        segmented_pages = script_data.get("segmented_pages", None)
+        self.compose_storytelling_video(config, pages, segmented_pages)

@@ -6,8 +6,9 @@ story_writer:
         max_conv_turns: 3
         num_outline: 4
         temperature: 0.5
+        max_pages: 5  # Maximum number of story pages to generate (for testing)
     params:
-        story_topic: "Time Management: A child learning how to manage their time effectively."
+        story_topic: "Magnet Mania - Introduction to magnets and how they work."
         main_role: "(no main role specified)"
         scene: "(no scene specified)"
 

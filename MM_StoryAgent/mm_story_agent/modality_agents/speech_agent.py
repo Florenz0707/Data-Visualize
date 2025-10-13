@@ -9,6 +9,7 @@ from aliyunsdkcore.request import CommonRequest
 import nls
 
 from mm_story_agent.base import register_tool
+from mm_story_agent.video_compose_agent import split_text_for_speech
 
 
 # Due to the trouble regarding environment, we use dashscope to deploy and call the API for CosyVoice.
@@ -152,15 +153,59 @@ class CosyVoiceAgent:
         pages: List = params["pages"]
         save_path: str = params["save_path"]
         generation_agent = CosyVoiceSynthesizer()
+        
+        # 检查是否提供了预切的页面
+        segmented_pages = params.get("segmented_pages", None)
+        
+        if segmented_pages is not None:
+            # 使用提供的segmented_pages
+            print(f"使用提供的切分页面: {len(segmented_pages)} 个页面")
+            for idx, segments in enumerate(segmented_pages):
+                print(f"处理页面 {idx + 1}: {len(segments)} 段")
+                for i, segment in enumerate(segments):
+                    word_count = len(segment.split())
+                    print(f"  段 {i+1}: {segment[:50]}{'...' if len(segment) > 50 else ''} ({word_count} 单词)")
+        else:
+            # 如果没有提供切分页面，使用智能切分算法
+            print("未提供切分页面，使用智能切分算法")
+            segmented_pages = []
+            for idx, page in enumerate(pages):
+                print(f"处理页面 {idx + 1}: {page[:100]}{'...' if len(page) > 100 else ''}")
+                
+                # 使用新的智能切分算法，每段最多25个单词
+                text_segments = split_text_for_speech(page, max_words=25)
+                segmented_pages.append(text_segments)
+                
+                print(f"  切分为 {len(text_segments)} 段:")
+                for i, segment in enumerate(text_segments):
+                    word_count = len(segment.split())
+                    print(f"    段 {i+1}: {segment} ({word_count} 单词)")
 
-        for idx, page in enumerate(pages):
-            generation_agent.call(
-                save_file=save_path / f"p{idx + 1}.wav",
-                transcript=page,
-                voice=params.get("voice", "xiaoyun"),
-                sample_rate=self.cfg.get("sample_rate", 16000)
-            )
+        # 根据切分结果生成语音 - 每个切分的句子生成一个独立的音频文件
+        audio_file_counter = 1
+        
+        for page_idx, segments in enumerate(segmented_pages):
+            print(f"处理页面 {page_idx + 1}: {len(segments)} 个句子")
+            
+            for seg_idx, segment in enumerate(segments):
+                # 为每个切分的句子生成独立的音频文件
+                audio_filename = f"s{audio_file_counter}.wav"  # s1.wav, s2.wav, s3.wav, ...
+                audio_file_path = save_path / audio_filename
+                
+                print(f"  生成音频 {audio_file_counter}: {segment[:50]}{'...' if len(segment) > 50 else ''}")
+                
+                generation_agent.call(
+                    save_file=audio_file_path,
+                    transcript=segment,
+                    voice=params.get("voice", "xiaoyun"),
+                    sample_rate=self.cfg.get("sample_rate", 16000)
+                )
+                
+                audio_file_counter += 1
+        
+        print(f"语音生成完成，共生成 {audio_file_counter - 1} 个音频文件")
 
         return {
-            "modality": "speech"
+            "modality": "speech",
+            "segmented_pages": segmented_pages  # 返回切分后的页面，用于字幕生成
         }
