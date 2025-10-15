@@ -112,7 +112,7 @@ class QAOutlineStoryWriter:
             if self.max_pages is not None and len(all_pages) >= self.max_pages:
                 print(f"Reached max_pages limit ({self.max_pages}), stopping generation.")
                 break
-                
+
             chapter_detail, success = chapter_writer.call(
                 json.dumps(
                     {
@@ -138,21 +138,21 @@ class QAOutlineStoryWriter:
                     success_check_fn=parse_list
                 )
             pages = [page.strip() for page in eval(chapter_detail)]
-            
+
             # Apply max_pages limit to the pages from this chapter
             if self.max_pages is not None:
                 remaining_slots = self.max_pages - len(all_pages)
                 if remaining_slots <= 0:
                     break
                 pages = pages[:remaining_slots]
-            
+
             all_pages.extend(pages)
-            
+
             # Check again after adding pages
             if self.max_pages is not None and len(all_pages) >= self.max_pages:
                 print(f"Reached max_pages limit ({self.max_pages}) after chapter {idx + 1}.")
                 break
-                
+
         # print(all_pages)
         print(f"Generated {len(all_pages)} pages total.")
         return all_pages

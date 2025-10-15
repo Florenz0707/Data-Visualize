@@ -44,8 +44,8 @@ class MMStoryAgent:
             print(f"  切分为 {len(text_segments)} 段")
             for i, segment in enumerate(text_segments):
                 word_count = len(segment.split())
-                print(f"    段 {i+1}: {segment[:50]}{'...' if len(segment) > 50 else ''} ({word_count} 单词)")
-        
+                print(f"    段 {i + 1}: {segment[:50]}{'...' if len(segment) > 50 else ''} ({word_count} 单词)")
+
         # 将切分结果保存到脚本数据中
         script_data["segmented_pages"] = segmented_pages
         print(f"文本切分完成，共 {len(segmented_pages)} 个页面")
@@ -59,7 +59,7 @@ class MMStoryAgent:
                 "pages": pages,
                 "save_path": story_dir / modality
             })
-            
+
             # 为语音生成提供切分后的页面
             if modality == "speech":
                 params[modality]["segmented_pages"] = segmented_pages
@@ -134,34 +134,34 @@ class MMStoryAgent:
     def resume_from_video_composition(self, config):
         """Resume from video composition stage, skipping story/speech/image generation"""
         story_dir = Path(config["story_dir"])
-        
+
         # Check if required assets exist
         script_data_path = story_dir / "script_data.json"
         if not script_data_path.exists():
             raise FileNotFoundError(f"Script data not found at {script_data_path}. Cannot resume without story data.")
-        
+
         # Load existing story data
         with open(script_data_path, "r", encoding="utf-8") as f:
             script_data = json.load(f)
-        
+
         pages = [page["story"] for page in script_data["pages"]]
-        
+
         print(f"Found existing story data with {len(pages)} pages")
-        
+
         # Check if speech and image assets exist
         speech_dir = story_dir / "speech"
         image_dir = story_dir / "image"
-        
+
         if speech_dir.exists() and any(speech_dir.glob("*.wav")):
             print(f"Found {len(list(speech_dir.glob('*.wav')))} speech files")
         else:
             print("Warning: No speech files found")
-        
+
         if image_dir.exists() and any(image_dir.glob("*.png")):
             print(f"Found {len(list(image_dir.glob('*.png')))} image files")
         else:
             print("Warning: No image files found")
-        
+
         print("Starting video composition...")
         # 从脚本数据中获取切分后的页面信息
         segmented_pages = script_data.get("segmented_pages", None)
