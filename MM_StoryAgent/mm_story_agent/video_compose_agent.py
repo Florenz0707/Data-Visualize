@@ -601,6 +601,9 @@ def add_caption(captions: List,
     
     print(f"字幕项目总数: {len(subtitle_items)}")
 
+    # Remove the custom argument before passing to TextClip to avoid TypeError
+    caption_config.pop('max_words_per_line', None)
+
     # Pre-render unique texts in parallel to speed up creation
     unique_texts = sorted({text for _, text in subtitle_items})
 
@@ -1014,8 +1017,8 @@ def compose_video(story_dir: Union[str, Path],
 
     video_clips = []
     # audio_durations = []
-    cur_duration = 0
     timestamps = []
+    actual_audio_durations = []  # 用于存储每个片段的真实音频时长
 
     # 新的逻辑：按句子处理音频，而不是按页面
     if segmented_pages is not None:
@@ -1041,24 +1044,11 @@ def compose_video(story_dir: Union[str, Path],
                     fade_silence = AudioArrayClip(fade_silence_array, fps=audio_sample_rate)
                     speech_clip = concatenate_audioclips([fade_silence, speech_clip, fade_silence])
                     
-                    # 计算时间轴 - 基于实际音频文件时长
-                    # 添加slide_duration（除了第一个音频文件）
-                    if audio_file_counter == 1:
-                        # 第一个音频：只有fade_duration
-                        speech_start_time = cur_duration + fade_duration
-                        speech_end_time = speech_start_time + actual_audio_duration
-                        cur_duration += fade_duration + actual_audio_duration + fade_duration
-                    else:
-                        # 其他音频：slide_duration + fade_duration
-                        speech_start_time = cur_duration + slide_duration + fade_duration
-                        speech_end_time = speech_start_time + actual_audio_duration
-                        cur_duration += slide_duration + fade_duration + actual_audio_duration + fade_duration
-                    
-                    timestamps.append([speech_start_time, speech_end_time])
+                    actual_audio_durations.append(actual_audio_duration) # 存储真实音频时长，后续统一计算
                     
                     print(f"  音频文件 {audio_file_counter} ({audio_filename}): {segment[:50]}{'...' if len(segment) > 50 else ''}")
                     print(f"    实际音频时长: {actual_audio_duration:.2f}s")
-                    print(f"    字幕时间轴: [{speech_start_time:.2f}s - {speech_end_time:.2f}s]")
+
                     print(f"    总音频时长（含效果）: {speech_clip.duration:.2f}s")
                     
                     # 加载对应的图像（使用页面图像）
@@ -1147,15 +1137,7 @@ def compose_video(story_dir: Union[str, Path],
             else:
                 actual_speech_duration = sum(temp_clip.duration for temp_clip in speech_clips)
             
-            speech_end_time = speech_start_time + actual_speech_duration
-            timestamps.append([speech_start_time, speech_end_time])
-            
-            # 调试信息：打印每页的时间轴信息
-            print(f"页面 {page}: 语音时长 {actual_speech_duration:.2f}s, 时间轴 [{speech_start_time:.2f}s - {speech_end_time:.2f}s]")
-            print(f"  实际语音在speech_clip中的位置: fade_duration={fade_duration:.2f}s 后开始")
-
-            # Update current duration for next iteration
-            cur_duration += speech_clip.duration
+            actual_audio_durations.append(actual_speech_duration) # 存储真实音频时长，后续统一计算
 
             speech_array, _ = librosa.core.load(speech_file, sr=None)
             speech_rms = librosa.feature.rms(y=speech_array)[0].mean()
@@ -1195,6 +1177,36 @@ def compose_video(story_dir: Union[str, Path],
 
     # final_clip = concatenate_videoclips(video_clips, method="compose")
     composite_clip = add_slide_effect(video_clips, slide_duration=slide_duration)
+
+    # --- 重构：从合成后的视频中提取精确时间戳 ---
+    # 放弃手动累加时间，以MoviePy的计算结果为准，根除累积误差
+    print("\n--- 从合成视频中提取精确时间戳 ---")
+    timestamps = []
+    # composite_clip.clips 包含了所有经过转场效果计算后的子片段
+    # 我们需要确保这里的片段顺序和我们之前记录的 actual_audio_durations 顺序一致
+    if len(composite_clip.clips) == len(actual_audio_durations):
+        for i, subclip in enumerate(composite_clip.clips):
+            actual_audio_duration = actual_audio_durations[i]
+            
+            # 计算语音在子片段中的实际开始时间
+            # MoviePy的 subclip.start 是整个片段（含静音转场）的开始时间
+            if i == 0:
+                # 第一个片段只有淡入
+                speech_start_time = subclip.start + fade_duration
+            else:
+                # 后续片段有转场+淡入
+                # 注意：add_slide_effect 的实现已经将 slide_duration 包含在了 subclip.start 中
+                # 我们创建的 video_clips 音频部分是 [fade, audio, fade]，所以语音总是从 fade_duration 之后开始
+                speech_start_time = subclip.start + fade_duration
+
+            speech_end_time = speech_start_time + actual_audio_duration
+            timestamps.append([speech_start_time, speech_end_time])
+            print(f"片段 {i+1}: 精确语音时间轴 [{speech_start_time:.3f}s - {speech_end_time:.3f}s]")
+    else:
+        print(f"❌ 错误：合成后的片段数量 ({len(composite_clip.clips)}) 与音频数量 ({len(actual_audio_durations)}) 不匹配！")
+        # 此处可以考虑是否抛出异常或使用旧逻辑作为回退
+
+    # --- 精确时间戳提取完毕 ---
     # Ensure final composite has the exact target size
     composite_clip = composite_clip.on_color(size=(target_width, target_height), color=(0, 0, 0), pos='center')
     composite_clip = add_bottom_black_area(composite_clip, black_area_height=caption_config["area_height"])

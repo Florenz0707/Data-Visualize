@@ -12,7 +12,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    with open(args.config, "r") as reader:
+    with open(args.config, "r", encoding="utf-8") as reader:
         config = yaml.load(reader, Loader=yaml.FullLoader)
     
     mm_story_agent = MMStoryAgent()
