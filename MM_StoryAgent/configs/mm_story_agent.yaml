@@ -32,7 +32,7 @@ image_generation:
         # Serial processing to comply with DashScope API rate limits (QPS: 0.5, concurrent: 1)
     params:
         seed: 112536
-        style_name: "Storybook" # ['(No style)', 'Japanese Anime', 'Digital/Oil Painting', 'Pixar/Disney Character', 
+        style_name: "Japanese Anime" # ['(No style)', 'Japanese Anime', 'Digital/Oil Painting', 'Pixar/Disney Character', 
                                 #  'Photographic', 'Comic book', 'Line art', 'Black and White Film Noir', 'Isometric Rooms']
 
 
@@ -55,11 +55,12 @@ video_compose:
             # stroke_color: white
             # stroke_width: 0.5
             max_length: 50
+            max_words_per_line: 17  # 每行字幕的最大单词数
             workers: 4  # parallel TextClip render threads for subtitles
         # enable_captions: true  # Enable captions (default)
         slideshow_effect:
-            fade_duration: 0.8
-            slide_duration: 0.4
+            fade_duration: 0.5
+            slide_duration: 0.2
             zoom_speed: 0.5
             move_ratio: 0.9
     

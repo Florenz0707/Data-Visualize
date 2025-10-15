@@ -495,7 +495,8 @@ def generate_srt(timestamps: List,
             print(f"句子 {idx+1}: 直接使用语音生成的句子（避免重复切分）")
         else:
             # 只有在传统页面级流程中才进行智能分割
-            caption_lines = split_caption_smart(caption_text, max_words=20)
+            max_words = caption_config.get("max_words_per_line", 20)
+            caption_lines = split_caption_smart(caption_text, max_words=max_words)
             print(f"页面 {idx+1}: 使用智能分割")
         
         # 基于实际语音时长计算每行的时间分配，添加过渡时间
