@@ -13,11 +13,23 @@ story_writer:
         scene: "(no scene specified)"
 
 speech_generation:
-    tool: cosyvoice_tts
+    tool: speech_generation
     cfg:
+        model: transformers  # Options: cosyvoice, neutt_air, transformers
+        # api_url: http://127.0.0.1:8000/tts  # For neutt_air model
+
+        # --- Transformers Model Config ---
+        model_id: "microsoft/speecht5_tts"
+        vocoder_id: "microsoft/speecht5_hifigan"
+        speaker_embeddings_id: "Matthijs/cmu-arctic-xvectors"
+        speaker_id: 7306  # Example speaker ID. For more options, see: https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors
+        # ---------------------------------
+
         sample_rate: &sample_rate 16000
     params:
-        voice: xiaoyun
+        # The 'voice' parameter is not directly used by the SpeechT5 model,
+        # as the voice is determined by the 'speaker_id' in the config above.
+        voice: "default"
 
 
 image_generation:

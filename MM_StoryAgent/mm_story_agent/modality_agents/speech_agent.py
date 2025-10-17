@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import requests
 from pathlib import Path
 from typing import List, Dict
 
@@ -143,16 +144,76 @@ class CosyVoiceSynthesizer:
         sdk.start(text=transcript, voice=voice, sample_rate=sample_rate, aformat='wav')
 
 
-@register_tool("cosyvoice_tts")
-class CosyVoiceAgent:
+class NeuttAirSynthesizer:
+
+    def __init__(self, cfg) -> None:
+        self.api_url = cfg.get('api_url', 'http://127.0.0.1:8000/tts')
+
+    def call(self, save_file, transcript, voice="default", sample_rate=16000):
+        try:
+            response = requests.post(self.api_url, json={
+                'text': transcript,
+                'voice': voice,
+                'sample_rate': sample_rate
+            })
+            response.raise_for_status()  # Raise an exception for bad status codes
+
+            with open(save_file, 'wb') as f:
+                f.write(response.content)
+
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f'NeuttAir API request failed: {e}')
+
+
+class TransformersSynthesizer:
+
+    def __init__(self, cfg):
+        from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
+        import torch
+        from datasets import load_dataset
+
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model_id = cfg.get('model_id', 'microsoft/speecht5_tts')
+        self.vocoder_id = cfg.get('vocoder_id', 'microsoft/speecht5_hifigan')
+        self.speaker_embeddings_id = cfg.get('speaker_embeddings_id', 'Matthijs/cmu-arctic-xvectors')
+        self.speaker_id = cfg.get('speaker_id', 7306)
+
+        self.processor = SpeechT5Processor.from_pretrained(self.model_id)
+        self.model = SpeechT5ForTextToSpeech.from_pretrained(self.model_id).to(self.device)
+        self.vocoder = SpeechT5HifiGan.from_pretrained(self.vocoder_id).to(self.device)
+
+        # Generate a generic speaker embedding to avoid dataset loading issues.
+        # This will result in a standard female voice.
+        self.speaker_embeddings = torch.zeros((1, 512)).to(self.device)
+
+    def call(self, save_file, transcript, voice="default", sample_rate=16000):
+        inputs = self.processor(text=transcript, return_tensors="pt").to(self.device)
+        
+        speech = self.model.generate_speech(inputs["input_ids"], self.speaker_embeddings, vocoder=self.vocoder)
+        
+        import soundfile as sf
+        sf.write(save_file, speech.cpu().numpy(), samplerate=sample_rate)
+
+
+@register_tool("speech_generation")
+class SpeechAgent:
 
     def __init__(self, cfg) -> None:
         self.cfg = cfg
+        self.model_name = self.cfg.get('model', 'cosyvoice')
 
     def call(self, params: Dict):
         pages: List = params["pages"]
         save_path: str = params["save_path"]
-        generation_agent = CosyVoiceSynthesizer()
+
+        if self.model_name == 'cosyvoice':
+            generation_agent = CosyVoiceSynthesizer()
+        elif self.model_name == 'neutt_air':
+            generation_agent = NeuttAirSynthesizer(self.cfg)
+        elif self.model_name == 'transformers':
+            generation_agent = TransformersSynthesizer(self.cfg)
+        else:
+            raise ValueError(f"Unsupported speech model: {self.model_name}")
 
         # 检查是否提供了预切的页面
         segmented_pages = params.get("segmented_pages", None)
@@ -197,7 +258,7 @@ class CosyVoiceAgent:
                 generation_agent.call(
                     save_file=audio_file_path,
                     transcript=segment,
-                    voice=params.get("voice", "xiaoyun"),
+                    voice=params.get("voice", "default"),
                     sample_rate=self.cfg.get("sample_rate", 16000)
                 )
 
