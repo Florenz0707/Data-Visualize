@@ -168,31 +168,44 @@ class NeuttAirSynthesizer:
 class TransformersSynthesizer:
 
     def __init__(self, cfg):
-        from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
         import torch
-        from datasets import load_dataset
-
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_id = cfg.get('model_id', 'microsoft/speecht5_tts')
-        self.vocoder_id = cfg.get('vocoder_id', 'microsoft/speecht5_hifigan')
-        self.speaker_embeddings_id = cfg.get('speaker_embeddings_id', 'Matthijs/cmu-arctic-xvectors')
-        self.speaker_id = cfg.get('speaker_id', 7306)
 
-        self.processor = SpeechT5Processor.from_pretrained(self.model_id)
-        self.model = SpeechT5ForTextToSpeech.from_pretrained(self.model_id).to(self.device)
-        self.vocoder = SpeechT5HifiGan.from_pretrained(self.vocoder_id).to(self.device)
-
-        # Generate a generic speaker embedding to avoid dataset loading issues.
-        # This will result in a standard female voice.
-        self.speaker_embeddings = torch.zeros((1, 512)).to(self.device)
+        if 'speecht5' in self.model_id.lower():
+            from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
+            self.processor = SpeechT5Processor.from_pretrained(self.model_id)
+            self.model = SpeechT5ForTextToSpeech.from_pretrained(self.model_id).to(self.device)
+            self.vocoder = SpeechT5HifiGan.from_pretrained(cfg.get('vocoder_id', 'microsoft/speecht5_hifigan')).to(self.device)
+            # Generate a generic speaker embedding for SpeechT5
+            self.speaker_embeddings = torch.zeros((1, 512)).to(self.device)
+        else:
+            # For general models like VibeVoice, use AutoProcessor and AutoModel
+            from transformers import AutoProcessor, AutoModelForTextToSpeech
+            self.processor = AutoProcessor.from_pretrained(self.model_id)
+            self.model = AutoModelForTextToSpeech.from_pretrained(self.model_id).to(self.device)
+            self.vocoder = None
+            self.speaker_embeddings = None
 
     def call(self, save_file, transcript, voice="default", sample_rate=16000):
-        inputs = self.processor(text=transcript, return_tensors="pt").to(self.device)
-        
-        speech = self.model.generate_speech(inputs["input_ids"], self.speaker_embeddings, vocoder=self.vocoder)
-        
+        import torch
         import soundfile as sf
-        sf.write(save_file, speech.cpu().numpy(), samplerate=sample_rate)
+
+        inputs = self.processor(text=transcript, return_tensors="pt").to(self.device)
+
+        if 'speecht5' in self.model_id.lower():
+            speech = self.model.generate_speech(inputs["input_ids"], self.speaker_embeddings, vocoder=self.vocoder)
+            sf.write(save_file, speech.cpu().numpy(), samplerate=sample_rate)
+        else:
+            # General case for models like VibeVoice
+            # These models often don't require separate speaker embeddings
+            with torch.no_grad():
+                output = self.model.generate(**inputs)
+            
+            # VibeVoice output is in 'waveform', and sample rate is in model config
+            waveform = output["waveform"].cpu().numpy().squeeze()
+            model_sample_rate = self.model.config.sampling_rate
+            sf.write(save_file, waveform, samplerate=model_sample_rate)
 
 
 @register_tool("speech_generation")

@@ -19,10 +19,8 @@ speech_generation:
         # api_url: http://127.0.0.1:8000/tts  # For neutt_air model
 
         # --- Transformers Model Config ---
-        model_id: "microsoft/speecht5_tts"
-        vocoder_id: "microsoft/speecht5_hifigan"
-        speaker_embeddings_id: "Matthijs/cmu-arctic-xvectors"
-        speaker_id: 7306  # Example speaker ID. For more options, see: https://huggingface.co/datasets/Matthijs/cmu-arctic-xvectors
+        model_id: "microsoft/VibeVoice-1.5B"
+        # vocoder_id and speaker_id are not needed for VibeVoice
         # ---------------------------------
 
         sample_rate: &sample_rate 16000
@@ -67,7 +65,7 @@ video_compose:
             # stroke_color: white
             # stroke_width: 0.5
             max_length: 50
-            max_words_per_line: 17  # 每行字幕的最大单词数
+            max_words_per_line: 15  # 每行字幕的最大单词数
             workers: 4  # parallel TextClip render threads for subtitles
         # enable_captions: true  # Enable captions (default)
         slideshow_effect:
