@@ -8,12 +8,18 @@ register_map = {
     'slideshow_video_compose': 'SlideshowVideoComposeAgent',
     'freesound_sfx_retrieval': 'FreesoundSfxAgent',
     'freesound_music_retrieval': 'FreesoundMusicAgent',
+    # Add speech generation tool mapping
+    'speech_generation': 'modality_agents.speech_agent',
 }
 
 
 def import_from_register(key):
     value = register_map[key]
-    exec(f'from . import {value}')
+    # Support both direct class import from package root and module path import
+    if '.' in value:
+        exec(f'from .{value} import *')
+    else:
+        exec(f'from . import {value}')
 
 
 class ToolRegistry(dict):

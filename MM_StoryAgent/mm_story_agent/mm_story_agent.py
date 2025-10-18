@@ -6,7 +6,6 @@ import torch.multiprocessing as mp
 mp.set_start_method("spawn", force=True)
 
 from .base import init_tool_instance
-from .modality_agents import speech_agent
 
 
 class MMStoryAgent:

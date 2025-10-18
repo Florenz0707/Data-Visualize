@@ -1,13 +1,13 @@
-from pathlib import Path
 import json
+from pathlib import Path
 from typing import List, Union, Dict
 
 import soundfile as sf
 import torchaudio
 from transformers import AutoProcessor, MusicgenForConditionalGeneration
 
-from mm_story_agent.prompts_en import story_to_music_reviser_system, story_to_music_reviewer_system
 from mm_story_agent.base import register_tool, init_tool_instance
+from mm_story_agent.prompts_en import story_to_music_reviser_system, story_to_music_reviewer_system
 
 
 class MusicGenSynthesizer:

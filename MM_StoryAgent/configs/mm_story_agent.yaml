@@ -6,28 +6,20 @@ story_writer:
         max_conv_turns: 3
         num_outline: 4
         temperature: 0.5
-        max_pages: 5  # Maximum number of story pages to generate (for testing)
+        max_pages: 3  # Maximum number of story pages to generate (for testing)
     params:
         story_topic: "Magnet Mania - Introduction to magnets and how they work."
-        main_role: "(no main role specified)"
+        main_role: "Little Girl Penny"
         scene: "(no scene specified)"
 
 speech_generation:
     tool: speech_generation
     cfg:
-        model: transformers  # Options: cosyvoice, neutt_air, transformers
-        # api_url: http://127.0.0.1:8000/tts  # For neutt_air model
-
-        # --- Transformers Model Config ---
-        model_id: "microsoft/VibeVoice-1.5B"
-        # vocoder_id and speaker_id are not needed for VibeVoice
-        # ---------------------------------
-
-        sample_rate: &sample_rate 16000
+        model: kokoro
+        sample_rate: 24000
+        lang_code: "a"
     params:
-        # The 'voice' parameter is not directly used by the SpeechT5 model,
-        # as the voice is determined by the 'speaker_id' in the config above.
-        voice: "default"
+        voice: "af_heart"
 
 
 image_generation:

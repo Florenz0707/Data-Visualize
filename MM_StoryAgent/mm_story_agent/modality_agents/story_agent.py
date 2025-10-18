@@ -1,13 +1,13 @@
 import json
-from typing import Dict
 import random
+from typing import Dict
 
 from tqdm import trange, tqdm
 
-from ..utils.llm_output_check import parse_list
 from ..base import register_tool, init_tool_instance
 from ..prompts_en import question_asker_system, expert_system, \
     dlg_based_writer_system, dlg_based_writer_prompt, chapter_writer_system
+from ..utils.llm_output_check import parse_list
 
 
 def json_parse_outline(outline):

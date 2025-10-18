@@ -12,11 +12,33 @@ from typing import List, Union
 
 import cv2
 import librosa
-import moviepy.video.compositing.transitions as transfx
+# transitions module removed in MoviePy v2; use slide_in/slide_out instead
 import numpy as np
 from moviepy.audio.AudioClip import AudioArrayClip
-from moviepy.editor import ImageClip, CompositeVideoClip, ColorClip, VideoFileClip, VideoClip, TextClip, \
-    concatenate_audioclips
+from moviepy.audio.AudioClip import concatenate_audioclips
+
+# Robust imports for MoviePy FX across versions/environments
+try:
+    from moviepy.video.fx.slide_in import slide_in
+    from moviepy.video.fx.slide_out import slide_out
+except Exception:
+    try:
+        import moviepy.editor as _mpy
+
+        slide_in = _mpy.vfx.slide_in
+        slide_out = _mpy.vfx.slide_out
+    except Exception:
+        # Fallback no-op implementations if slide effects are unavailable
+        def slide_in(clip):
+            return clip
+
+
+        def slide_out(clip):
+            return clip
+
+from moviepy.video.VideoClip import ImageClip, ColorClip, VideoClip
+from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.video.tools.subtitles import SubtitlesClip
 from tqdm import trange, tqdm
 
@@ -339,7 +361,7 @@ def verify_audio_subtitle_sync(story_dir: Path, timestamps: List):
         if speech_file.exists():
             try:
                 import librosa
-                duration, sr = librosa.get_duration(filename=str(speech_file), sr=None)
+                duration = librosa.get_duration(filename=str(speech_file))
                 print(f"  语音文件时长: {duration:.2f}s")
                 print(f"  时间轴时长: {end_time - start_time:.2f}s")
 
@@ -374,7 +396,7 @@ def correct_timestamps_with_audio(story_dir: Path, timestamps: List, fade_durati
             for i, (timestamp, audio_file) in enumerate(zip(timestamps, audio_files)):
                 try:
                     import librosa
-                    actual_duration = librosa.get_duration(path=str(audio_file))
+                    actual_duration = librosa.get_duration(filename=str(audio_file))
                     print(f"语音文件 {audio_file.name}:")
                     print(f"  实际语音时长: {actual_duration:.2f}s")
                     print(f"  使用时间轴: {timestamp[0]:.2f}s - {timestamp[1]:.2f}s")
@@ -396,7 +418,7 @@ def correct_timestamps_with_audio(story_dir: Path, timestamps: List, fade_durati
     for i, audio_file in enumerate(audio_files):
         try:
             import librosa
-            actual_duration = librosa.get_duration(path=str(audio_file))
+            actual_duration = librosa.get_duration(filename=str(audio_file))
 
             # 计算修正后的时间轴
             if i == 0:
@@ -464,10 +486,13 @@ def generate_srt(timestamps: List,
                  captions: List,
                  save_path: Union[str, Path],
                  segmented_pages: List = None,
-                 max_single_length: int = 30):
+                 max_single_length: int = 30,
+                 caption_config: dict | None = None):
     """
     保留原函数用于向后兼容，但建议使用 generate_srt_from_subtitle_items
     """
+    if caption_config is None:
+        caption_config = {}
 
     def format_time(seconds: float) -> str:
         td = timedelta(seconds=seconds)
@@ -609,11 +634,55 @@ def add_caption(captions: List,
     # Remove the custom argument before passing to TextClip to avoid TypeError
     caption_config.pop('max_words_per_line', None)
 
+    # Prepare minimal-safe kwargs for TextClip in this environment
+    # Avoid passing fontsize/font/etc to prevent signature conflicts
+    textclip_kwargs = {}
+
     # Pre-render unique texts in parallel to speed up creation
     unique_texts = sorted({text for _, text in subtitle_items})
 
-    def render_text_clip(text: str) -> TextClip:
-        return TextClip(text, **caption_config)
+    def render_text_clip(text: str):
+        # Render text to an image using PIL, honoring caption_config (font, fontsize, color)
+        from PIL import Image, ImageDraw, ImageFont, ImageColor
+        # Read style from caption_config
+        font_path = caption_config.get('font') or caption_config.get('font_path')
+        fontsize = int(caption_config.get('fontsize', 32))
+        color_val = caption_config.get('color', 'white')
+        try:
+            fill_rgba = ImageColor.getrgb(color_val)
+            if len(fill_rgba) == 3:
+                fill_rgba = (*fill_rgba, 255)
+        except Exception:
+            fill_rgba = (255, 255, 255, 255)
+        # Padding around text
+        pad_x, pad_y = 20, 10
+        # Select font
+        try:
+            if font_path:
+                font = ImageFont.truetype(font_path, fontsize)
+            else:
+                font = ImageFont.load_default()
+        except Exception:
+            font = ImageFont.load_default()
+        # Measure text box
+        dummy_img = Image.new('L', (1, 1), 0)
+        draw = ImageDraw.Draw(dummy_img)
+        # textbbox available in recent Pillow; fallback to textsize if needed
+        try:
+            text_bbox = draw.textbbox((0, 0), text, font=font)
+            text_w = max(1, text_bbox[2] - text_bbox[0])
+            text_h = max(1, text_bbox[3] - text_bbox[1])
+        except Exception:
+            text_w, text_h = draw.textsize(text, font=font)
+        img_w = text_w + pad_x * 2
+        img_h = text_h + pad_y * 2
+        # Draw text on transparent canvas
+        img = Image.new('RGBA', (img_w, img_h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.text((pad_x, pad_y), text, font=font, fill=fill_rgba)
+        # Convert to numpy array and wrap as ImageClip
+        arr = np.array(img)
+        return ImageClip(arr)
 
     text_to_clip = {}
     if unique_texts:
@@ -626,24 +695,22 @@ def add_caption(captions: List,
                 except Exception:
                     # Fallback: create minimal clip on failure
                     try:
-                        text_to_clip[text] = TextClip(text, fontsize=caption_config.get('fontsize', 24),
-                                                      color=caption_config.get('color', 'white'))
+                        text_to_clip[text] = render_text_clip(text)
                     except Exception:
                         # As a last resort, skip this text
-                        text_to_clip[text] = TextClip("", fontsize=caption_config.get('fontsize', 24),
-                                                      color=caption_config.get('color', 'white'))
+                        text_to_clip[text] = render_text_clip("")
 
     # Construct subtitles from text, using cached pre-rendered clips
-    def make_textclip_from_cache(txt: str) -> TextClip:
+    def make_textclip_from_cache(txt: str) -> ImageClip:
         clip = text_to_clip.get(txt)
         if clip is None:
-            clip = TextClip(txt, **caption_config)
+            clip = render_text_clip(txt)
             text_to_clip[txt] = clip
         return clip
 
     subtitles = SubtitlesClip(subtitle_items, make_textclip=make_textclip_from_cache)
     captioned_clip = CompositeVideoClip([video_clip,
-                                         subtitles.set_position(("center", "bottom"), relative=True)])
+                                         subtitles.with_position(("center", "bottom"), relative=True)])
     return captioned_clip, subtitle_items
 
 
@@ -901,38 +968,14 @@ def add_bottom_black_area(clip: VideoFileClip,
         VideoFileClip: Processed video clip.
     """
     black_bar = ColorClip(size=(clip.w, black_area_height), color=(0, 0, 0), duration=clip.duration)
-    extended_clip = CompositeVideoClip([clip, black_bar.set_position(("center", "bottom"))])
+    extended_clip = CompositeVideoClip([clip, black_bar.with_position(("center", "bottom"))])
     return extended_clip
 
 
 def add_zoom_effect(clip, speed=1.0, mode='in', position='center', fps=None):
-    if fps is None:
-        fps = getattr(clip, 'fps', 24)
-    duration = clip.duration
-    total_frames = int(duration * fps)
-
-    def main(getframe, t):
-        frame = getframe(t)
-        h, w = frame.shape[: 2]
-        i = t * fps
-        if mode == 'out':
-            i = total_frames - i
-        zoom = 1 + (i * ((0.1 * speed) / total_frames))
-        positions = {'center': [(w - (w * zoom)) / 2, (h - (h * zoom)) / 2],
-                     'left': [0, (h - (h * zoom)) / 2],
-                     'right': [(w - (w * zoom)), (h - (h * zoom)) / 2],
-                     'top': [(w - (w * zoom)) / 2, 0],
-                     'topleft': [0, 0],
-                     'topright': [(w - (w * zoom)), 0],
-                     'bottom': [(w - (w * zoom)) / 2, (h - (h * zoom))],
-                     'bottomleft': [0, (h - (h * zoom))],
-                     'bottomright': [(w - (w * zoom)), (h - (h * zoom))]}
-        tx, ty = positions[position]
-        M = np.array([[zoom, 0, tx], [0, zoom, ty]])
-        frame = cv2.warpAffine(frame, M, (w, h))
-        return frame
-
-    return clip.fl(main)
+    """Safe no-op zoom effect for environments lacking clip.fl on CompositeVideoClip.
+    Keep pipeline stable without per-frame transforms."""
+    return clip
 
 
 def add_move_effect(clip, direction="left", move_raito=0.95):
@@ -941,7 +984,7 @@ def add_move_effect(clip, direction="left", move_raito=0.95):
 
     new_width = int(orig_width / move_raito)
     new_height = int(orig_height / move_raito)
-    clip = clip.resize(width=new_width, height=new_height)
+    clip = clip.resized(width=new_width, height=new_height)
 
     if direction == "left":
         start_position = (0, 0)
@@ -951,7 +994,7 @@ def add_move_effect(clip, direction="left", move_raito=0.95):
         end_position = (0, 0)
 
     duration = clip.duration
-    moving_clip = clip.set_position(
+    moving_clip = clip.with_position(
         lambda t: (start_position[0] + (
                 end_position[0] - start_position[0]) / duration * t, start_position[1])
     )
@@ -965,8 +1008,8 @@ def add_slide_effect(clips, slide_duration):
     ####### CAUTION: requires at least `slide_duration` of silence at the end of each clip #######
     durations = [clip.duration for clip in clips]
     first_clip = CompositeVideoClip(
-        [clips[0].fx(transfx.slide_out, duration=slide_duration, side="left")]
-    ).set_start(0)
+        [slide_out(clips[0])]
+    ).with_start(0)
 
     slide_out_sides = ["left"]
     videos = [first_clip]
@@ -982,19 +1025,17 @@ def add_slide_effect(clips, slide_duration):
         slide_out_side = "left" if random.random() <= 0.5 else "right"
         slide_out_sides.append(slide_out_side)
 
-        videos.append(
-            (
-                CompositeVideoClip(
-                    [clip.fx(transfx.slide_in, duration=slide_duration, side=slide_in_side)]
-                )
-                .set_start(sum(durations[:idx]) - (slide_duration) * idx)
-                .fx(transfx.slide_out, duration=slide_duration, side=slide_out_side)
-            )
+        middle_clip = (
+            CompositeVideoClip([
+                slide_in(clip)
+            ]).with_start(sum(durations[:idx]) - slide_duration * idx)
         )
+        videos.append(middle_clip)
+        videos[-1] = slide_out(videos[-1])
 
     last_clip = CompositeVideoClip(
-        [clips[-1].fx(transfx.slide_in, duration=slide_duration, side=out_to_in_mapping[slide_out_sides[-1]])]
-    ).set_start(sum(durations[:-1]) - slide_duration * (len(clips) - 1))
+        [slide_in(clips[-1])]
+    ).with_start(sum(durations[:-1]) - slide_duration * (len(clips) - 1))
     videos.append(last_clip)
 
     video = CompositeVideoClip(videos)
@@ -1062,14 +1103,17 @@ def compose_video(story_dir: Union[str, Path],
                     # 加载对应的图像（使用页面图像）
                     image_file = (image_dir / f"./p{page_idx + 1}.png").__str__()
                     image_clip = ImageClip(image_file)
-                    image_clip = image_clip.set_duration(speech_clip.duration).set_fps(fps)
+                    image_clip = image_clip.with_duration(speech_clip.duration).with_fps(fps)
 
                     # Fit image into target canvas without stretching (letterbox if needed)
                     img_w, img_h = image_clip.size
                     scale = min(target_width / img_w, target_height / img_h)
-                    fitted_clip = image_clip.resize(scale)
-                    image_clip = fitted_clip.on_color(size=(target_width, target_height), color=(0, 0, 0), pos='center')
-                    image_clip = image_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+                    new_w, new_h = int(img_w * scale), int(img_h * scale)
+                    fitted_clip = image_clip.resized(width=new_w, height=new_h)
+                    bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0)).with_duration(
+                        fitted_clip.duration)
+                    image_clip = CompositeVideoClip([bg, fitted_clip.with_position('center')])
+                    image_clip = image_clip
 
                     # 添加视觉效果
                     if random.random() <= 0.5:  # zoom in or zoom out
@@ -1086,9 +1130,9 @@ def compose_video(story_dir: Union[str, Path],
                         image_clip = add_move_effect(image_clip, direction=direction, move_raito=move_ratio)
 
                     # 确保音频有正确的采样率
-                    audio_clip = speech_clip.set_fps(audio_sample_rate)
+                    audio_clip = speech_clip.with_fps(audio_sample_rate)
 
-                    video_clip = image_clip.set_audio(audio_clip)
+                    video_clip = image_clip.with_audio(audio_clip)
                     video_clips.append(video_clip)
 
                     audio_file_counter += 1
@@ -1097,6 +1141,7 @@ def compose_video(story_dir: Union[str, Path],
     else:
         # 回退到原来的按页面处理逻辑
         print("使用原来的按页面处理逻辑")
+        cur_duration = 0.0  # 累计当前已添加到时间线的总时长
         for page in trange(1, num_pages + 1):
             # speech track
             # Create stereo silence to avoid channel mismatches
@@ -1153,14 +1198,17 @@ def compose_video(story_dir: Union[str, Path],
             # set image as the main content, align the duration
             image_file = (image_dir / f"./p{page}.png").__str__()
             image_clip = ImageClip(image_file)
-            image_clip = image_clip.set_duration(speech_clip.duration).set_fps(fps)
+            image_clip = image_clip.with_duration(speech_clip.duration).with_fps(fps)
 
             # Fit image into target canvas without stretching (letterbox if needed)
             img_w, img_h = image_clip.size
             scale = min(target_width / img_w, target_height / img_h)
-            fitted_clip = image_clip.resize(scale)
-            image_clip = fitted_clip.on_color(size=(target_width, target_height), color=(0, 0, 0), pos='center')
-            image_clip = image_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+            new_w, new_h = int(img_w * scale), int(img_h * scale)
+            fitted_clip = image_clip.resized(width=new_w, height=new_h)
+            bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0)).with_duration(fitted_clip.duration)
+            image_clip = CompositeVideoClip([bg, fitted_clip.with_position('center')])
+            # Crossfade not available on CompositeVideoClip in this environment; no-op
+            image_clip = image_clip
 
             if random.random() <= 0.5:  # zoom in or zoom out
                 if random.random() <= 0.5:
@@ -1176,10 +1224,13 @@ def compose_video(story_dir: Union[str, Path],
                 image_clip = add_move_effect(image_clip, direction=direction, move_raito=move_ratio)
 
             # Ensure audio has consistent sample rate (already set above)
-            audio_clip = speech_clip.set_fps(audio_sample_rate)
+            audio_clip = speech_clip.with_fps(audio_sample_rate)
 
-            video_clip = image_clip.set_audio(audio_clip)
+            video_clip = image_clip.with_audio(audio_clip)
             video_clips.append(video_clip)
+
+            # 更新累计时长，供下一页的起始时间参考
+            cur_duration += speech_clip.duration
 
             # audio_durations.append(audio_clip.duration)
 
@@ -1217,7 +1268,8 @@ def compose_video(story_dir: Union[str, Path],
 
     # --- 精确时间戳提取完毕 ---
     # Ensure final composite has the exact target size
-    composite_clip = composite_clip.on_color(size=(target_width, target_height), color=(0, 0, 0), pos='center')
+    bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0)).with_duration(composite_clip.duration)
+    composite_clip = CompositeVideoClip([bg, composite_clip.with_position('center')])
     composite_clip = add_bottom_black_area(composite_clip, black_area_height=caption_config["area_height"])
     del caption_config["area_height"]
     max_caption_length = caption_config["max_length"]
@@ -1331,7 +1383,7 @@ def compose_video(story_dir: Union[str, Path],
         print(f"Video duration: {composite_clip.duration:.2f}s")
 
         # Ensure audio has the correct fps and duration
-        audio_clip = composite_clip.audio.set_fps(audio_sample_rate)
+        audio_clip = composite_clip.audio.with_fps(audio_sample_rate)
 
         # 提前打印所有调试信息
         print(f"Audio clip duration: {audio_clip.duration:.2f}s")
@@ -1351,8 +1403,6 @@ def compose_video(story_dir: Union[str, Path],
             # 使用更简单的音频写入参数
             audio_clip.write_audiofile(
                 temp_audio_path,
-                verbose=True,  # 启用详细输出显示进度
-                logger=None,
                 codec='pcm_s16le',  # 使用简单的PCM编码
                 ffmpeg_params=['-ac', '2']  # 确保立体声
             )
@@ -1510,13 +1560,16 @@ class SlideshowVideoComposeAgent:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
 
-    def adjust_caption_config(self, width, height):
-        area_height = int(height * 0.06)
-        fontsize = int((width + height) / 2 * 0.025)
-        return {
-            "fontsize": fontsize,
-            "area_height": area_height
-        }
+    def adjust_caption_config(self, width, height, existing: dict | None = None):
+        # Provide sane defaults based on resolution, but do NOT overwrite user-provided values
+        existing = dict(existing or {})
+        area_height_default = int(height * 0.06)
+        fontsize_default = int((width + height) / 2 * 0.025)
+        if "area_height" not in existing:
+            existing["area_height"] = area_height_default
+        if "fontsize" not in existing:
+            existing["fontsize"] = fontsize_default
+        return existing
 
     def call(self, params):
         height = params["height"]

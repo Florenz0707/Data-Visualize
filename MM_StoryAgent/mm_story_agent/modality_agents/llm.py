@@ -1,5 +1,5 @@
-from typing import Dict, Callable
 import os
+from typing import Dict, Callable
 
 from dashscope import Generation
 

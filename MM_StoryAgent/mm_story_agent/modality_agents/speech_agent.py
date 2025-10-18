@@ -1,13 +1,12 @@
-import os
 import json
+import os
 import re
-import requests
-from pathlib import Path
 from typing import List, Dict
 
+import nls
+import requests
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
-import nls
 
 from mm_story_agent.base import register_tool
 from mm_story_agent.video_compose_agent import split_text_for_speech
@@ -176,36 +175,113 @@ class TransformersSynthesizer:
             from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
             self.processor = SpeechT5Processor.from_pretrained(self.model_id)
             self.model = SpeechT5ForTextToSpeech.from_pretrained(self.model_id).to(self.device)
-            self.vocoder = SpeechT5HifiGan.from_pretrained(cfg.get('vocoder_id', 'microsoft/speecht5_hifigan')).to(self.device)
+            self.vocoder = SpeechT5HifiGan.from_pretrained(cfg.get('vocoder_id', 'microsoft/speecht5_hifigan')).to(
+                self.device)
             # Generate a generic speaker embedding for SpeechT5
             self.speaker_embeddings = torch.zeros((1, 512)).to(self.device)
         else:
-            # For general models like VibeVoice, use AutoProcessor and AutoModel
-            from transformers import AutoProcessor, AutoModelForTextToSpeech
-            self.processor = AutoProcessor.from_pretrained(self.model_id)
-            self.model = AutoModelForTextToSpeech.from_pretrained(self.model_id).to(self.device)
+            # For general models like VibeVoice, prefer AutoProcessor + AutoModel with trust_remote_code
+            from transformers import AutoProcessor, AutoModel
+            try:
+                self.processor = AutoProcessor.from_pretrained(self.model_id, trust_remote_code=True)
+            except Exception:
+                # Fallback to no processor; we'll pass raw text
+                self.processor = None
+            try:
+                self.model = AutoModel.from_pretrained(self.model_id, trust_remote_code=True).to(self.device)
+                self.pipe = None
+            except Exception:
+                # Fallback to pipeline if AutoModel fails
+                from transformers import pipeline
+                self.model = None
+                self.pipe = pipeline(
+                    task="text-to-audio",
+                    model=self.model_id,
+                    trust_remote_code=True,
+                    device=0 if self.device == "cuda" else -1
+                )
             self.vocoder = None
             self.speaker_embeddings = None
 
     def call(self, save_file, transcript, voice="default", sample_rate=16000):
         import torch
+        import numpy as np
         import soundfile as sf
 
-        inputs = self.processor(text=transcript, return_tensors="pt").to(self.device)
-
         if 'speecht5' in self.model_id.lower():
+            inputs = self.processor(text=transcript, return_tensors="pt").to(self.device)
             speech = self.model.generate_speech(inputs["input_ids"], self.speaker_embeddings, vocoder=self.vocoder)
             sf.write(save_file, speech.cpu().numpy(), samplerate=sample_rate)
         else:
-            # General case for models like VibeVoice
-            # These models often don't require separate speaker embeddings
-            with torch.no_grad():
-                output = self.model.generate(**inputs)
-            
-            # VibeVoice output is in 'waveform', and sample rate is in model config
-            waveform = output["waveform"].cpu().numpy().squeeze()
-            model_sample_rate = self.model.config.sampling_rate
-            sf.write(save_file, waveform, samplerate=model_sample_rate)
+            if self.model is not None:
+                # Use AutoModel path
+                if self.processor is not None:
+                    inputs = self.processor(text=transcript, return_tensors="pt")
+                    inputs = {k: (v.to(self.device) if torch.is_tensor(v) else v) for k, v in inputs.items()}
+                else:
+                    inputs = {"text": transcript}
+                with torch.no_grad():
+                    if hasattr(self.model, "generate"):
+                        output = self.model.generate(**inputs)
+                    else:
+                        output = self.model(**inputs)
+                waveform = None
+                if isinstance(output, dict):
+                    waveform = output.get("waveform") or output.get("audio_values")
+                elif torch.is_tensor(output):
+                    waveform = output
+                elif isinstance(output, (list, tuple)) and output and torch.is_tensor(output[0]):
+                    waveform = output[0]
+                if waveform is None:
+                    raise RuntimeError("TTS model returned unsupported output format")
+                arr = waveform.detach().cpu().numpy().squeeze()
+                sr = getattr(getattr(self.model, "config", None), "sampling_rate", None) or sample_rate
+                sf.write(save_file, arr, samplerate=sr)
+            else:
+                # Fallback: pipeline path
+                out = self.pipe(transcript)
+                if isinstance(out, list) and out and isinstance(out[0], dict):
+                    item = out[0]
+                    arr = item.get("audio") or item.get("array") or item.get("waveform")
+                    sr = item.get("sampling_rate") or sample_rate
+                    if arr is None:
+                        raise RuntimeError("Pipeline returned unsupported output format")
+                    arr = np.asarray(arr).squeeze()
+                    sf.write(save_file, arr, samplerate=sr)
+                else:
+                    raise RuntimeError(f"Unexpected pipeline output type: {type(out)}")
+
+
+class KokoroSynthesizer:
+
+    def __init__(self, cfg) -> None:
+        # Lazy import to avoid hard dependency if unused
+        from kokoro import KPipeline
+        self.lang_code = cfg.get("lang_code", "a")
+        self.default_sr = int(cfg.get("sample_rate", 24000))
+        self.pipeline = KPipeline(lang_code=self.lang_code)
+
+    def call(self, save_file, transcript, voice="af_heart", sample_rate=None):
+        import numpy as np
+        import soundfile as sf
+        sr = int(sample_rate or self.default_sr or 24000)
+        generator = self.pipeline(transcript, voice=voice)
+        chunks = []
+        for _, _, audio in generator:
+            # Support torch.Tensor or numpy arrays from Kokoro
+            try:
+                import torch
+                if isinstance(audio, torch.Tensor):
+                    audio_np = audio.detach().cpu().numpy().astype("float32")
+                else:
+                    import numpy as np
+                    audio_np = np.asarray(audio, dtype="float32")
+            except Exception:
+                import numpy as np
+                audio_np = np.asarray(audio, dtype="float32")
+            chunks.append(audio_np)
+        audio_out = np.concatenate(chunks) if chunks else np.zeros((0,), dtype="float32")
+        sf.write(save_file, audio_out, sr)
 
 
 @register_tool("speech_generation")
@@ -225,6 +301,8 @@ class SpeechAgent:
             generation_agent = NeuttAirSynthesizer(self.cfg)
         elif self.model_name == 'transformers':
             generation_agent = TransformersSynthesizer(self.cfg)
+        elif self.model_name == 'kokoro':
+            generation_agent = KokoroSynthesizer(self.cfg)
         else:
             raise ValueError(f"Unsupported speech model: {self.model_name}")
 
