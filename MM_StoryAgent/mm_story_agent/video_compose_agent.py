@@ -17,24 +17,19 @@ import numpy as np
 from moviepy.audio.AudioClip import AudioArrayClip
 from moviepy.audio.AudioClip import concatenate_audioclips
 
-# Robust imports for MoviePy FX across versions/environments
 try:
-    from moviepy.video.fx.slide_in import slide_in
-    from moviepy.video.fx.slide_out import slide_out
+    from moviepy import vfx
+
+    slide_in = vfx.slide_in
+    slide_out = vfx.slide_out
 except Exception:
-    try:
-        import moviepy.editor as _mpy
-
-        slide_in = _mpy.vfx.slide_in
-        slide_out = _mpy.vfx.slide_out
-    except Exception:
-        # Fallback no-op implementations if slide effects are unavailable
-        def slide_in(clip):
-            return clip
+    # Fallback no-op implementations if slide effects are unavailable
+    def slide_in(clip):
+        return clip
 
 
-        def slide_out(clip):
-            return clip
+    def slide_out(clip):
+        return clip
 
 from moviepy.video.VideoClip import ImageClip, ColorClip, VideoClip
 from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
@@ -216,17 +211,7 @@ def _write_video_with_ffmpeg_detailed(composite_clip, output_path, fps, total_fr
 
                 # 检查输出文件是否存在及其大小
                 if os.path.exists(output_path):
-                    current_size = os.path.getsize(output_path)
-                    if current_size > last_size:
-                        # 基于文件大小估算进度（粗略估算）
-                        estimated_total_size = frame_count * 50000  # 假设每帧约50KB
-                        percent = min(100, (current_size / estimated_total_size) * 100)
-                        print(
-                            f"\rFFmpeg转换进度: {percent:.1f}% - {elapsed:.1f}s (文件大小: {current_size / 1024:.1f}KB)",
-                            end='', flush=True)
-                        last_size = current_size
-                    else:
-                        print(f"\rFFmpeg转换进度: 处理中... - {elapsed:.1f}s", end='', flush=True)
+                    print(f"\rFFmpeg转换进度: 处理中... - {elapsed:.1f}s", end='', flush=True)
                 else:
                     print(f"\rFFmpeg转换进度: 启动中... - {elapsed:.1f}s", end='', flush=True)
 
@@ -298,53 +283,6 @@ def test_smart_splitting():
         print(f"  {i}. {line} ({word_count} 单词)")
 
 
-def validate_captions_and_timestamps(captions: List, timestamps: List, story_dir: Path):
-    """验证字幕和时间轴的匹配度"""
-    print("\n" + "=" * 50)
-    print("字幕和时间轴验证")
-    print("=" * 50)
-
-    print(f"字幕数量: {len(captions)}")
-    print(f"时间轴数量: {len(timestamps)}")
-
-    if len(captions) != len(timestamps):
-        print(f"❌ 数量不匹配！字幕({len(captions)}) vs 时间轴({len(timestamps)})")
-        return False
-
-    print("✓ 数量匹配")
-
-    # 检查每个字幕的时间轴和分割效果
-    for i, (caption, timestamp) in enumerate(zip(captions, timestamps)):
-        start_time, end_time = timestamp
-        duration = end_time - start_time
-
-        # 测试智能分割
-        caption_lines = split_caption_smart(caption, max_words=20)
-
-        print(f"页面 {i + 1}:")
-        print(f"  原始字幕: {caption[:50]}{'...' if len(caption) > 50 else ''}")
-        print(f"  分割为 {len(caption_lines)} 行，每行最多20个单词")
-        print(f"  时间轴: {start_time:.2f}s - {end_time:.2f}s (时长: {duration:.2f}s)")
-
-        # 显示分割结果和时间分配
-        line_duration = duration / len(caption_lines) if caption_lines else 0
-        for j, line in enumerate(caption_lines):
-            word_count = len(line.split())
-            line_start = start_time + line_duration * j
-            line_end = start_time + line_duration * (j + 1)
-            print(f"    行 {j + 1}: {line_start:.2f}s - {line_end:.2f}s: {line} ({word_count} 单词)")
-
-        # 检查时间轴是否合理
-        if duration <= 0:
-            print(f"  ❌ 时间轴错误：时长为 {duration:.2f}s")
-            return False
-        elif duration > 60:  # 超过60秒可能有问题
-            print(f"  ⚠️  时间轴过长：{duration:.2f}s")
-
-    print("✓ 时间轴验证通过")
-    return True
-
-
 def verify_audio_subtitle_sync(story_dir: Path, timestamps: List):
     """验证音频与字幕的同步情况"""
     print("\n" + "=" * 50)
@@ -366,13 +304,13 @@ def verify_audio_subtitle_sync(story_dir: Path, timestamps: List):
                 print(f"  时间轴时长: {end_time - start_time:.2f}s")
 
                 if abs(duration - (end_time - start_time)) > 0.5:
-                    print(f"  ⚠️  时长不匹配！差异: {abs(duration - (end_time - start_time)):.2f}s")
+                    print(f"  时长不匹配！差异: {abs(duration - (end_time - start_time)):.2f}s")
                 else:
-                    print(f"  ✓ 时长匹配")
+                    print(f"  时长匹配")
             except Exception as e:
-                print(f"  ❌ 无法读取语音文件: {e}")
+                print(f"  无法读取语音文件: {e}")
         else:
-            print(f"  ❌ 语音文件不存在: {speech_file}")
+            print(f"  语音文件不存在: {speech_file}")
 
     print("✓ 同步验证完成")
 
@@ -439,7 +377,7 @@ def correct_timestamps_with_audio(story_dir: Path, timestamps: List, fade_durati
             print(f"  修正时间轴: {corrected_start:.2f}s - {corrected_end:.2f}s")
 
         except Exception as e:
-            print(f"  ❌ 无法读取语音文件 {audio_file}: {e}")
+            print(f"  无法读取语音文件 {audio_file}: {e}")
             # 如果无法读取，使用原始时间轴或跳过
             if i < len(timestamps):
                 corrected_timestamps.append(timestamps[i])
@@ -486,7 +424,6 @@ def generate_srt(timestamps: List,
                  captions: List,
                  save_path: Union[str, Path],
                  segmented_pages: List = None,
-                 max_single_length: int = 30,
                  caption_config: dict | None = None):
     """
     保留原函数用于向后兼容，但建议使用 generate_srt_from_subtitle_items
@@ -562,25 +499,10 @@ def generate_srt(timestamps: List,
 
 
 def add_caption(captions: List,
-                srt_path: Union[str, Path],
                 timestamps: List,
                 video_clip: VideoClip,
                 segmented_pages: List = None,
-                max_single_length: int = 30,
-                workers: int = 4,
                 **caption_config):
-    # Configure ImageMagick path for MoviePy
-    import os
-    import moviepy.config as config
-
-    imagemagick_path = r'D:\ImageMagick-7.1.2-Q16-HDRI\magick.exe'
-    os.environ['IMAGEMAGICK_BINARY'] = imagemagick_path
-    try:
-        config.change_settings({'IMAGEMAGICK_BINARY': imagemagick_path})
-        print(f"ImageMagick configured: {imagemagick_path}")
-    except Exception as e:
-        print(f"ImageMagick config warning: {e}")
-
     # Build subtitle timing and text - 使用智能分割，基于实际语音时长
     subtitle_items = []  # list of ((start, end), text)
     num_caps = len(timestamps)
@@ -592,7 +514,6 @@ def add_caption(captions: List,
         caption_text = captions[idx].strip()
 
         if not caption_text:
-            print(f"页面 {idx + 1}: 空字幕，跳过")
             continue
 
         # 当使用segmented_pages流程时，captions已经是句子级别，直接使用不再切分
@@ -600,14 +521,10 @@ def add_caption(captions: List,
         if segmented_pages is not None:
             # 在segmented_pages流程中，每个caption就是一个完整的句子，不需要再切分
             caption_lines = [caption_text]
-            print(f"句子 {idx + 1}: 直接使用语音生成的句子（避免重复切分）")
         else:
             # 只有在传统页面级流程中才进行智能分割
             caption_lines = split_caption_smart(caption_text, max_words=20)
-            print(f"页面 {idx + 1}: 使用智能分割")
 
-        print(f"页面 {idx + 1}: 原始文本 '{caption_text[:50]}{'...' if len(caption_text) > 50 else ''}'")
-        print(f"  分割为 {len(caption_lines)} 行:")
 
         # 直接使用传入的时间轴，不进行内部重新计算
         # 这确保字幕时间轴与实际音频文件完全同步
@@ -619,24 +536,14 @@ def add_caption(captions: List,
         else:
             line_duration = total_duration
 
-        print(f"  语音时长: {total_duration:.2f}s, 分割为 {len(caption_lines)} 行, 每行显示: {line_duration:.2f}s")
-
         for line_idx, line in enumerate(caption_lines):
             # 直接基于传入的时间轴计算每行时间，确保与音频同步
             line_start = start_time + line_duration * line_idx
             line_end = start_time + line_duration * (line_idx + 1)
-
-            print(f"    行 {line_idx + 1}: {line_start:.2f}s - {line_end:.2f}s: '{line}' ({len(line.split())} 单词)")
             subtitle_items.append(((line_start, line_end), line))
-
-    print(f"字幕项目总数: {len(subtitle_items)}")
 
     # Remove the custom argument before passing to TextClip to avoid TypeError
     caption_config.pop('max_words_per_line', None)
-
-    # Prepare minimal-safe kwargs for TextClip in this environment
-    # Avoid passing fontsize/font/etc to prevent signature conflicts
-    textclip_kwargs = {}
 
     # Pre-render unique texts in parallel to speed up creation
     unique_texts = sorted({text for _, text in subtitle_items})
@@ -722,7 +629,7 @@ def split_keep_separator(text, separator):
 
 def split_text_for_speech(text, max_words=20):
     """
-    为语音生成切分文本：优先保持完整句子，每句不超过max_words个单词
+    为语音生成切分文本, 优先保持完整句子。每句不超过max_words个单词
     这是专门用于语音生成时的文本切分算法，优先保持句子的完整性
     改进版本：正确处理缩写词，避免在缩写词后错误分割
     """
@@ -761,14 +668,6 @@ def split_text_for_speech(text, max_words=20):
             marker = f"__ABBR_{i}__"
             abbreviation_markers[marker] = abbr + '.'
             protected_text = re.sub(pattern, marker, protected_text)
-
-    # 定义标点符号分割点（按优先级排序，从强到弱）
-    # 句号、感叹号、问号是强分割点
-    # 分号、冒号是中等分割点  
-    # 逗号是弱分割点
-    strong_punctuation = r'[.!?]+'
-    medium_punctuation = r'[;:]+'
-    weak_punctuation = r'[,]+'
 
     # 第一步：按强标点符号分割，保持标点符号
     sentences = re.split(r'([.!?]+)', protected_text)
@@ -1014,13 +913,10 @@ def add_slide_effect(clips, slide_duration):
     slide_out_sides = ["left"]
     videos = [first_clip]
 
-    out_to_in_mapping = {"left": "right", "right": "left"}
-
     for idx, clip in enumerate(clips[1: -1], start=1):
         # For all other clips in the middle, we need them to slide in to the previous clip and out for the next one
 
         # determine `slide_in_side` according to the `slide_out_side` of the previous clip
-        slide_in_side = out_to_in_mapping[slide_out_sides[-1]]
 
         slide_out_side = "left" if random.random() <= 0.5 else "right"
         slide_out_sides.append(slide_out_side)
@@ -1075,9 +971,7 @@ def compose_video(story_dir: Union[str, Path],
         audio_file_counter = 1
 
         for page_idx, segments in enumerate(segmented_pages):
-            print(f"处理页面 {page_idx + 1}: {len(segments)} 个句子")
-
-            for seg_idx, segment in enumerate(segments):
+            for _, segment in enumerate(segments):
                 # 为每个句子创建视频片段
                 audio_filename = f"s{audio_file_counter}.wav"
                 audio_file_path = speech_dir / audio_filename
@@ -1093,12 +987,6 @@ def compose_video(story_dir: Union[str, Path],
                     speech_clip = concatenate_audioclips([fade_silence, speech_clip, fade_silence])
 
                     actual_audio_durations.append(actual_audio_duration)  # 存储真实音频时长，后续统一计算
-
-                    print(
-                        f"  音频文件 {audio_file_counter} ({audio_filename}): {segment[:50]}{'...' if len(segment) > 50 else ''}")
-                    print(f"    实际音频时长: {actual_audio_duration:.2f}s")
-
-                    print(f"    总音频时长（含效果）: {speech_clip.duration:.2f}s")
 
                     # 加载对应的图像（使用页面图像）
                     image_file = (image_dir / f"./p{page_idx + 1}.png").__str__()
@@ -1163,7 +1051,7 @@ def compose_video(story_dir: Union[str, Path],
 
             else:  # multiple speech files
                 single_utterance = False
-                speech_files = list(speech_dir.glob(f"p{page}_*.wav"))
+                speech_files = list(speech_dir.glob(f"s{page}_*.wav"))
                 speech_files = sorted(speech_files, key=lambda x: int(x.stem.split("_")[-1]))
                 speech_clips = []
 
@@ -1191,9 +1079,6 @@ def compose_video(story_dir: Union[str, Path],
                 actual_speech_duration = sum(temp_clip.duration for temp_clip in speech_clips)
 
             actual_audio_durations.append(actual_speech_duration)  # 存储真实音频时长，后续统一计算
-
-            speech_array, _ = librosa.core.load(speech_file, sr=None)
-            speech_rms = librosa.feature.rms(y=speech_array)[0].mean()
 
             # set image as the main content, align the duration
             image_file = (image_dir / f"./p{page}.png").__str__()
@@ -1312,64 +1197,54 @@ def compose_video(story_dir: Union[str, Path],
                 corrected_timestamps = corrected_timestamps[:min_count]
                 print(f"调整后：句子级字幕数量: {len(sentence_captions)}, 时间轴数量: {len(corrected_timestamps)}")
 
-            # 验证修正后的字幕和时间轴匹配度
-            if not validate_captions_and_timestamps(sentence_captions, corrected_timestamps, story_dir):
-                print("❌ 字幕和时间轴验证失败，跳过字幕生成")
-                enable_captions = False
-            else:
-                # 使用修正后的时间轴和句子级字幕
-                timestamps = corrected_timestamps
-                captions = sentence_captions
+            # 使用修正后的时间轴和句子级字幕
+            timestamps = corrected_timestamps
+            captions = sentence_captions
 
-                # 先生成字幕，获取实际的subtitle_items
-                composite_clip, subtitle_items = add_caption(
-                    captions,
-                    story_dir / "captions.srt",
-                    timestamps,
-                    composite_clip,
-                    segmented_pages,
-                    max_caption_length,
-                    **caption_config
-                )
+            # 先生成字幕，获取实际的subtitle_items
+            composite_clip, subtitle_items = add_caption(
+                captions,
+                story_dir / "captions.srt",
+                timestamps,
+                composite_clip,
+                segmented_pages,
+                max_caption_length,
+                **caption_config
+            )
 
-                # 使用实际的subtitle_items生成SRT文件，确保完全一致
-                generate_srt_from_subtitle_items(subtitle_items, story_dir / "captions.srt")
-                print(f"SRT文件已生成: {story_dir / 'captions.srt'}")
+            # 使用实际的subtitle_items生成SRT文件，确保完全一致
+            generate_srt_from_subtitle_items(subtitle_items, story_dir / "captions.srt")
+            print(f"SRT文件已生成: {story_dir / 'captions.srt'}")
         else:
-            # 回退到原来的页面级字幕处理
-            if not validate_captions_and_timestamps(captions, corrected_timestamps, story_dir):
-                print("❌ 字幕和时间轴验证失败，跳过字幕生成")
-                enable_captions = False
-            else:
-                # 使用修正后的时间轴
-                timestamps = corrected_timestamps
-                # 确保字幕数量与时间轴数量匹配
-                print(f"页面级字幕数量: {len(captions)}, 时间轴数量: {len(timestamps)}")
+            # 使用修正后的时间轴
+            timestamps = corrected_timestamps
+            # 确保字幕数量与时间轴数量匹配
+            print(f"页面级字幕数量: {len(captions)}, 时间轴数量: {len(timestamps)}")
 
-                # 如果数量不匹配，进行调整
-                if len(captions) != len(timestamps):
-                    print(f"警告：页面级字幕数量({len(captions)})与时间轴数量({len(timestamps)})不匹配，正在调整...")
+            # 如果数量不匹配，进行调整
+            if len(captions) != len(timestamps):
+                print(f"警告：页面级字幕数量({len(captions)})与时间轴数量({len(timestamps)})不匹配，正在调整...")
 
-                    # 取较小的数量，避免索引越界
-                    min_count = min(len(captions), len(timestamps))
-                    captions = captions[:min_count]
-                    timestamps = timestamps[:min_count]
-                    print(f"调整后：页面级字幕数量: {len(captions)}, 时间轴数量: {len(timestamps)}")
+                # 取较小的数量，避免索引越界
+                min_count = min(len(captions), len(timestamps))
+                captions = captions[:min_count]
+                timestamps = timestamps[:min_count]
+                print(f"调整后：页面级字幕数量: {len(captions)}, 时间轴数量: {len(timestamps)}")
 
-                # 先生成字幕，获取实际的subtitle_items
-                composite_clip, subtitle_items = add_caption(
-                    captions,
-                    story_dir / "captions.srt",
-                    timestamps,
-                    composite_clip,
-                    segmented_pages,
-                    max_caption_length,
-                    **caption_config
-                )
+            # 先生成字幕，获取实际的subtitle_items
+            composite_clip, subtitle_items = add_caption(
+                captions,
+                story_dir / "captions.srt",
+                timestamps,
+                composite_clip,
+                segmented_pages,
+                max_caption_length,
+                **caption_config
+            )
 
-                # 使用实际的subtitle_items生成SRT文件，确保完全一致
-                generate_srt_from_subtitle_items(subtitle_items, story_dir / "captions.srt")
-                print(f"SRT文件已生成: {story_dir / 'captions.srt'}")
+            # 使用实际的subtitle_items生成SRT文件，确保完全一致
+            generate_srt_from_subtitle_items(subtitle_items, story_dir / "captions.srt")
+            print(f"SRT文件已生成: {story_dir / 'captions.srt'}")
 
     if not enable_captions:
         print("Captions disabled - generating video without subtitles")
@@ -1428,7 +1303,6 @@ def compose_video(story_dir: Union[str, Path],
         print(f"总帧数: {total_frames}")
 
         # 直接使用FFmpeg方法，避免moviepy卡住问题
-        print("使用直接FFmpeg方法写入视频（避免moviepy卡住问题）...")
         _write_video_with_ffmpeg_detailed(composite_clip, temp_video_path, fps, total_frames)
         print(f"\n✓ 视频文件写入完成 ({total_frames} 帧)")
 
@@ -1477,7 +1351,7 @@ def compose_video(story_dir: Union[str, Path],
         try:
             # 方法1：使用copy编解码器（最快）
             cmd = [
-                'ffmpeg', '-y',
+                'ffmpeg',
                 '-i', temp_video_path,
                 '-i', temp_audio_path,
                 '-c:v', 'copy',
@@ -1572,9 +1446,11 @@ class SlideshowVideoComposeAgent:
         return existing
 
     def call(self, params):
+        import json
         height = params["height"]
         width = params["width"]
         pages = params["pages"]
+        story_dir = Path(params["story_dir"])
         # Handle caption configuration safely
         if "caption" in params:
             params["caption"].update(self.adjust_caption_config(width, height))
@@ -1582,8 +1458,31 @@ class SlideshowVideoComposeAgent:
             # If no caption config, create a default one
             params["caption"] = self.adjust_caption_config(width, height)
 
-        # 获取切分后的页面信息（如果存在）
-        segmented_pages = params.get("segmented_pages", None)
+        # 优先从 script_data.json 读取 segmented_pages（如果存在且结构匹配）
+        segmented_pages = None
+        script_json = story_dir / "script_data.json"
+        if script_json.exists():
+            try:
+                with open(script_json, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # 常见结构1：{"segmented_pages": [["sent1", "sent2"], ...]}
+                if isinstance(data, dict) and isinstance(data.get("segmented_pages"), list):
+                    segmented_pages = data["segmented_pages"]
+                # 常见结构2：{"pages": [{"segments": [...]}, ...]}
+                elif isinstance(data, dict) and isinstance(data.get("pages"), list):
+                    pages_list = data["pages"]
+                    if all(isinstance(p, dict) and isinstance(p.get("segments"), list) for p in pages_list):
+                        segmented_pages = [p.get("segments", []) for p in pages_list]
+                # 常见结构3：根就是列表（已经是分段后的页面）
+                elif isinstance(data, list) and all(isinstance(p, list) for p in data):
+                    segmented_pages = data
+                if segmented_pages is not None:
+                    print(f"从 script_data.json 读取 segmented_pages：{sum(len(s) for s in segmented_pages)} 个句子，{len(segmented_pages)} 个页面")
+                else:
+                    print("script_data.json 存在，但未找到可识别的 segmented_pages 结构，回退到参数/默认")
+            except Exception as e:
+                print(f"读取 script_data.json 失败：{e}，回退到参数/默认")
+        # 若脚本文件不可用，则回退到 params 里的 segmented_pages（若有）
 
         compose_video(
             story_dir=Path(params["story_dir"]),

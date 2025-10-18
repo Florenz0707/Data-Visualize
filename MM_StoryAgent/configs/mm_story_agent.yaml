@@ -27,15 +27,14 @@ image_generation:
     cfg:
         num_turns: 3
         api_type: "dashscope"  # Options: "dashscope", "openai", "stability", "replicate", "custom"
-        api_key: ""  # Will use DASHSCOPE_API_KEY from environment (set in start.bat)
         llm: "qwen"
         height: &image_height 720
         width: &image_width 1280
-        # Serial processing to comply with DashScope API rate limits (QPS: 0.5, concurrent: 1)
     params:
         seed: 112536
-        style_name: "Japanese Anime" # ['(No style)', 'Japanese Anime', 'Digital/Oil Painting', 'Pixar/Disney Character', 
-                                #  'Photographic', 'Comic book', 'Line art', 'Black and White Film Noir', 'Isometric Rooms']
+        style_name: "Japanese Anime" 
+        # ['(No style)', 'Japanese Anime', 'Digital/Oil Painting', 'Pixar/Disney Character', 
+        #  'Photographic', 'Comic book', 'Line art', 'Black and White Film Noir', 'Isometric Rooms']
 
 
 video_compose:
@@ -50,14 +49,14 @@ video_compose:
         audio_sample_rate: 44100
         audio_codec: aac
         caption:
-            font: resources/font/msyh.ttf
+            font: resource/font/FiraCode-Regular.ttf
             # bg_color: LightGrey
-            fontsize: 32
+            fontsize: 28
             color: white
             # stroke_color: white
             # stroke_width: 0.5
             max_length: 50
-            max_words_per_line: 15  # 每行字幕的最大单词数
+            max_words_per_line: 10  # 每行字幕的最大单词数
             workers: 4  # parallel TextClip render threads for subtitles
         # enable_captions: true  # Enable captions (default)
         slideshow_effect:

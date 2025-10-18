@@ -1,7 +1,20 @@
 import json
 import os
 import re
+import warnings
 from typing import List, Dict
+
+# Suppress noisy warnings the user doesn't want to see
+warnings.filterwarnings(
+    "ignore",
+    message=r"^dropout option adds dropout after all but last recurrent layer",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    category=FutureWarning,
+    module=r"torch\.nn\.utils\.weight_norm",
+)
 
 import nls
 import requests
@@ -257,9 +270,20 @@ class KokoroSynthesizer:
     def __init__(self, cfg) -> None:
         # Lazy import to avoid hard dependency if unused
         from kokoro import KPipeline
+        # Suppress kokoro repo_id default warning by passing repo_id explicitly (or filter if upstream prints)
+        warnings.filterwarnings(
+            "ignore",
+            message=r"^Defaulting repo_id",
+            category=UserWarning,
+        )
         self.lang_code = cfg.get("lang_code", "a")
         self.default_sr = int(cfg.get("sample_rate", 24000))
-        self.pipeline = KPipeline(lang_code=self.lang_code)
+        self.repo_id = cfg.get("repo_id", "hexgrad/Kokoro-82M")
+        try:
+            self.pipeline = KPipeline(lang_code=self.lang_code, repo_id=self.repo_id)
+        except TypeError:
+            # Older versions may not accept repo_id; fall back without it
+            self.pipeline = KPipeline(lang_code=self.lang_code)
 
     def call(self, save_file, transcript, voice="af_heart", sample_rate=None):
         import numpy as np
