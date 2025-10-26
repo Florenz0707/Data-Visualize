@@ -1,0 +1,37 @@
+[project]
+name = "django-story-platform"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "accelerate>=1.11.0",
+    "black>=25.9.0",
+    "celery>=5.5.3",
+    "channels>=4.3.1",
+    "channels-redis>=4.3.0",
+    "diffusers>=0.35.2",
+    "django>=5.2.7",
+    "django-cors-headers>=4.9.0",
+    "django-extensions>=4.1",
+    "djangorestframework>=3.16.1",
+    "flake8>=7.3.0",
+    "httpx>=0.28.1",
+    "librosa>=0.11.0",
+    "moviepy==1.0.3",
+    "numpy>=2.2.6",
+    "opencv-python>=4.12.0.88",
+    "pandas>=2.3.3",
+    "pathlib>=1.0.1",
+    "pillow>=12.0.0",
+    "psycopg2-binary>=2.9.11",
+    "pytest>=8.4.2",
+    "pytest-django>=4.11.1",
+    "python-dotenv>=1.1.1",
+    "redis>=7.0.0",
+    "requests>=2.32.5",
+    "soundfile>=0.13.1",
+    "torch>=2.9.0",
+    "torchvision>=0.24.0",
+    "transformers>=4.57.1",
+]
