@@ -313,22 +313,38 @@ class SpeechAgent:
 
     def __init__(self, cfg) -> None:
         self.cfg = cfg
-        self.model_name = self.cfg.get('model', 'cosyvoice')
+        # 支持新旧两种配置方式
+        # 新方式: provider字段来自models.yaml
+        # 旧方式: model字段直接指定
+        self.model_name = self.cfg.get('provider') or self.cfg.get('model', 'cosyvoice')
 
     def call(self, params: Dict):
         pages: List = params["pages"]
         save_path: str = params["save_path"]
 
-        if self.model_name == 'cosyvoice':
-            generation_agent = CosyVoiceSynthesizer()
-        elif self.model_name == 'neutt_air':
-            generation_agent = NeuttAirSynthesizer(self.cfg)
-        elif self.model_name == 'transformers':
-            generation_agent = TransformersSynthesizer(self.cfg)
-        elif self.model_name == 'kokoro':
-            generation_agent = KokoroSynthesizer(self.cfg)
+        # Map provider names and legacy model names to synthesizer classes
+        synthesizer_map = {
+            # New provider names from models.yaml
+            'dashscope': CosyVoiceSynthesizer,
+            'custom_api': NeuttAirSynthesizer,
+            'transformers': TransformersSynthesizer,
+            'local': KokoroSynthesizer,
+            # Old model names for backward compatibility
+            'cosyvoice': CosyVoiceSynthesizer,
+            'neutt_air': NeuttAirSynthesizer,
+            'kokoro': KokoroSynthesizer,
+        }
+
+        synthesizer_class = synthesizer_map.get(self.model_name)
+
+        if synthesizer_class:
+            if self.model_name == 'dashscope' or self.model_name == 'cosyvoice':
+                # CosyVoiceSynthesizer has no cfg dependency in its __init__
+                generation_agent = CosyVoiceSynthesizer()
+            else:
+                generation_agent = synthesizer_class(self.cfg)
         else:
-            raise ValueError(f"Unsupported speech model: {self.model_name}")
+            raise ValueError(f"Unsupported speech model or provider: '{self.model_name}'")
 
         # 检查是否提供了预切的页面
         segmented_pages = params.get("segmented_pages", None)

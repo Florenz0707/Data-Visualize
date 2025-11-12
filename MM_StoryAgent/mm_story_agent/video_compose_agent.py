@@ -269,18 +269,18 @@ def _load_wav_as_stereo_clip(file_path: str, target_sr: int) -> AudioArrayClip:
 
 
 def test_smart_splitting():
-    """测试智能分割功能"""
+    """测试智能分割功能（按字符切分）"""
     test_caption = "Under the moonlit sky, Timmy Turtle lay in his cozy bed, dreaming of center stage at the Forest Talent Show. His heart swelled with excitement as he imagined the spotlight on him, performing a dance that would leave the audience breathless."
 
     print("测试智能分割功能:")
     print(f"原始文本: {test_caption}")
-    print(f"单词数: {len(test_caption.split())}")
+    print(f"字符数: {len(test_caption)}")
 
-    lines = split_caption_smart(test_caption, max_words=20)
+    lines = split_caption_smart_chars(test_caption, max_chars=40)
     print(f"\n分割结果 ({len(lines)} 行):")
     for i, line in enumerate(lines, 1):
-        word_count = len(line.split())
-        print(f"  {i}. {line} ({word_count} 单词)")
+        char_count = len(line)
+        print(f"  {i}. {line} ({char_count} 字符)")
 
 
 def verify_audio_subtitle_sync(story_dir: Path, timestamps: List):
@@ -460,10 +460,16 @@ def generate_srt(timestamps: List,
             caption_lines = [caption_text]
             print(f"句子 {idx + 1}: 直接使用语音生成的句子（避免重复切分）")
         else:
-            # 只有在传统页面级流程中才进行智能分割
-            max_words = caption_config.get("max_words_per_line", 20)
-            caption_lines = split_caption_smart(caption_text, max_words=max_words)
-            print(f"页面 {idx + 1}: 使用智能分割")
+            # 只有在传统页面级流程中才进行智能分割（按字符）
+            max_chars = caption_config.get("max_chars_per_line")
+            if not max_chars:
+                legacy_words = caption_config.get("max_words_per_line", 0)
+                try:
+                    max_chars = int(legacy_words) * 5 if legacy_words else 40
+                except Exception:
+                    max_chars = 40
+            caption_lines = split_caption_smart_chars(caption_text, max_chars=max_chars)
+            print(f"页面 {idx + 1}: 使用智能分割（按字符，每行≤{max_chars} 字符）")
 
         # 基于实际语音时长计算每行的时间分配，添加过渡时间
         total_duration = end_time - start_time
@@ -522,9 +528,19 @@ def add_caption(captions: List,
             # 在segmented_pages流程中，每个caption就是一个完整的句子，不需要再切分
             caption_lines = [caption_text]
         else:
-            # 只有在传统页面级流程中才进行智能分割
-            caption_lines = split_caption_smart(caption_text, max_words=20)
-
+            # 只有在传统页面级流程中才进行智能分割（按字符）
+            max_chars = caption_config.get("max_chars_per_line")
+            if not max_chars:
+                # 兼容旧配置：将 max_words_per_line 粗略换算为字符数（约5字符/词）
+                legacy_words = caption_config.get("max_words_per_line")
+                if legacy_words:
+                    try:
+                        max_chars = int(legacy_words) * 5
+                    except Exception:
+                        max_chars = 40
+                else:
+                    max_chars = 40
+            caption_lines = split_caption_smart_chars(caption_text, max_chars=max_chars)
 
         # 直接使用传入的时间轴，不进行内部重新计算
         # 这确保字幕时间轴与实际音频文件完全同步
@@ -547,6 +563,9 @@ def add_caption(captions: List,
 
     # Pre-render unique texts in parallel to speed up creation
     unique_texts = sorted({text for _, text in subtitle_items})
+
+    # Number of parallel workers for text rendering
+    workers = caption_config.get('workers', 1)
 
     def render_text_clip(text: str):
         # Render text to an image using PIL, honoring caption_config (font, fontsize, color)
@@ -836,13 +855,68 @@ def split_text_for_speech(text, max_words=20):
     return result_segments
 
 
-def split_caption_smart(caption, max_words=20):
+def split_caption_smart_chars(text: str, max_chars: int = 40) -> List[str]:
     """
-    智能分割字幕：优先按标点符号分割，每句不超过max_words个单词
-    这个函数保持向后兼容，内部调用新的语音切分算法
+    按“字符”为最小单位的智能字幕分割：
+    - 优先在强/中/弱标点处断句
+    - 每行不超过 max_chars 字符
+    - 若在自然断点前已达到上限，则在上限处硬切
+    适用于中英文混排。
     """
-    # 使用新的语音切分算法，但调整最大单词数
-    return split_text_for_speech(caption, max_words)
+    if not text:
+        return []
+
+    # 定义分隔优先级：强 -> 中 -> 弱
+    strong = set(list("。！？.!?"))
+    medium = set(list("；;：:"))
+    weak = set(list("，,、;"))
+
+    pieces = []
+    buf = ""
+
+    def flush_buffer():
+        nonlocal buf
+        while buf:
+            if len(buf) <= max_chars:
+                pieces.append(buf)
+                buf = ""
+                break
+            else:
+                # 尝试在 max_chars 范围内寻找最近的空格或自然分隔
+                cut = -1
+                # 优先找强/中/弱标点作为切分点
+                for i in range(min(len(buf), max_chars), 0, -1):
+                    ch = buf[i - 1]
+                    if ch in strong or ch in medium or ch in weak or ch.isspace():
+                        cut = i
+                        break
+                if cut == -1:
+                    cut = max_chars
+                pieces.append(buf[:cut])
+                buf = buf[cut:]
+
+    for ch in text:
+        buf += ch
+        if len(buf) >= max_chars:
+            # 达到上限，优先在标点处分割
+            flush_buffer()
+            continue
+        # 若遇到强/中/弱标点且当前长度达到一定比例，进行自然断句
+        if ch in strong:
+            if len(buf) >= max(1, int(max_chars * 0.5)):
+                flush_buffer()
+        elif ch in medium:
+            if len(buf) >= max(1, int(max_chars * 0.7)):
+                flush_buffer()
+        elif ch in weak:
+            if len(buf) >= max(1, int(max_chars * 0.9)):
+                flush_buffer()
+
+    if buf:
+        flush_buffer()
+
+    # 保留原始字符，不去除空白，确保拼接后与原文一致
+    return [p for p in pieces if p != ""]
 
 
 def split_caption(caption, max_length=30):
@@ -1204,11 +1278,9 @@ def compose_video(story_dir: Union[str, Path],
             # 先生成字幕，获取实际的subtitle_items
             composite_clip, subtitle_items = add_caption(
                 captions,
-                story_dir / "captions.srt",
                 timestamps,
                 composite_clip,
                 segmented_pages,
-                max_caption_length,
                 **caption_config
             )
 
@@ -1234,11 +1306,9 @@ def compose_video(story_dir: Union[str, Path],
             # 先生成字幕，获取实际的subtitle_items
             composite_clip, subtitle_items = add_caption(
                 captions,
-                story_dir / "captions.srt",
                 timestamps,
                 composite_clip,
                 segmented_pages,
-                max_caption_length,
                 **caption_config
             )
 
@@ -1337,7 +1407,7 @@ def compose_video(story_dir: Union[str, Path],
                 else:
                     # 基于时间估算，但更保守
                     estimated_total = 60  # 增加到60秒
-                    percent = min(95, (elapsed / estimated_total) * 100)  # 最多显示95%
+                    percent = min(95, int((elapsed / estimated_total) * 100))  # 最多显示95%
                     print(f"\r合并进度: {percent:.1f}% - {elapsed:.1f}s", end='', flush=True)
 
                 time.sleep(0.5)
@@ -1477,7 +1547,8 @@ class SlideshowVideoComposeAgent:
                 elif isinstance(data, list) and all(isinstance(p, list) for p in data):
                     segmented_pages = data
                 if segmented_pages is not None:
-                    print(f"从 script_data.json 读取 segmented_pages：{sum(len(s) for s in segmented_pages)} 个句子，{len(segmented_pages)} 个页面")
+                    print(
+                        f"从 script_data.json 读取 segmented_pages：{sum(len(s) for s in segmented_pages)} 个句子，{len(segmented_pages)} 个页面")
                 else:
                     print("script_data.json 存在，但未找到可识别的 segmented_pages 结构，回退到参数/默认")
             except Exception as e:
