@@ -1,9 +1,14 @@
-from typing import List
+from typing import List, Optional
+from pathlib import Path
+import os
+import mimetypes
+import zipfile
+import tempfile
 
 from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
-from django.http import HttpRequest
+from django.http import HttpRequest, FileResponse
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -113,8 +118,12 @@ def my_tasks(request: HttpRequest):
     return TaskListOut(task_ids=ids)
 
 
-@api.get("/task/{task_id}/resource", response={200: ResourceOut})
-def task_resource(request: HttpRequest, task_id: int, segmentId: int):
+@api.get("/task/{task_id}/resource")
+def task_resource(request: HttpRequest, task_id: int, segmentId: int, name: Optional[str] = None):
+    """Download resources for a completed segment.
+    - If a single file exists (or name provided), return it directly as attachment.
+    - If multiple files and no name provided, return a zip archive.
+    """
     user = require_user(request)
     task = Task.objects.filter(id=task_id, user=user).first()
     if not task:
@@ -123,9 +132,67 @@ def task_resource(request: HttpRequest, task_id: int, segmentId: int):
     if task.current_segment < segmentId:
         raise HttpError(400, "Segment not completed yet")
 
-    # Return file paths as relative strings
-    items = list(Resource.objects.filter(task=task, segment_id=segmentId).values_list("path", flat=True))
-    return ResourceOut(resources=items)
+    story_dir = Path(task.story_dir).resolve()
+    resources = list(Resource.objects.filter(task=task, segment_id=segmentId).values_list("path", flat=True))
+    if not resources:
+        raise HttpError(404, "No resources for this segment")
+
+    def _safe_path(p: str) -> Path:
+        q = Path(p).resolve()
+        # Ensure resource is under this task's story_dir
+        try:
+            if not q.is_file() or not q.is_relative_to(story_dir):
+                raise ValueError
+        except AttributeError:
+            # Fallback for older Python (not needed on 3.13): manual check
+            if not q.is_file() or str(q).find(str(story_dir)) != 0:
+                raise ValueError
+        return q
+
+    # If client specified a name, try return that file
+    if name:
+        cand = [r for r in resources if Path(r).name == name]
+        if not cand:
+            raise HttpError(404, "Requested file not found in resources")
+        fpath = _safe_path(cand[0])
+        mime, _ = mimetypes.guess_type(str(fpath))
+        resp = FileResponse(open(fpath, "rb"), content_type=mime or "application/octet-stream")
+        resp["Content-Disposition"] = f"attachment; filename=\"{fpath.name}\""
+        return resp
+
+    # No specific name: if only one file, return it; else zip them
+    if len(resources) == 1:
+        fpath = _safe_path(resources[0])
+        mime, _ = mimetypes.guess_type(str(fpath))
+        resp = FileResponse(open(fpath, "rb"), content_type=mime or "application/octet-stream")
+        resp["Content-Disposition"] = f"attachment; filename=\"{fpath.name}\""
+        return resp
+
+    # Multiple files: stream a zip
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"-task{task_id}-seg{segmentId}.zip")
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    try:
+        with zipfile.ZipFile(tmp_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for r in resources:
+                fpath = _safe_path(r)
+                # Archive with relative path inside the task directory
+                try:
+                    arcname = fpath.relative_to(story_dir)
+                except ValueError:
+                    arcname = fpath.name
+                zf.write(fpath, arcname=str(arcname))
+        resp = FileResponse(open(tmp_path, "rb"), content_type="application/zip")
+        resp["Content-Disposition"] = f"attachment; filename=\"task{task_id}-segment{segmentId}.zip\""
+        # Note: tmp file will be cleaned up by OS on reboot; for strict cleanup, consider background deletion
+        return resp
+    except Exception as e:
+        # Best-effort cleanup on error
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise HttpError(500, f"Failed to prepare download: {e}")
 
 
 def _record_resources(task: Task, segment_id: int, paths: List[str], rtype: str):

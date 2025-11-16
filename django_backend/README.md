@@ -16,7 +16,7 @@
 2) 创建任务，得到 task_id（可填写：主题、主角、场景）
 3) 按顺序逐段执行（1 → 5），每次执行返回 202（已排队）
 4) 订阅通知（WebSocket）接收完成/失败消息
-5) 每段完成后，用资源查询接口拉取对应文件路径
+5) 每段完成后，使用资源下载接口直接获取该段文件（单文件或自动打包）
 
 注意：
 - 段必须按顺序执行（segmentId 必须是 current_segment + 1）
@@ -89,9 +89,9 @@
       "message": "Execution queued"
     }
 
-- GET /api/task/{task_id}/resource?segmentId=N（需鉴权）
-  - 作用：获取指定段已完成后的资源路径列表（如图片/音频/脚本/视频）。
-  - 响应：{ "resources": string[] }
+- GET /api/task/{task_id}/resource?segmentId=N[&name=文件名]（需鉴权）
+  - 作用：下载指定段资源。若指定 name 且文件存在则直接下载该文件；未指定 name 且该段只有一个文件则直接下载；若有多个文件则自动打包为 zip 返回。
+  - 响应：文件下载（单文件：原始类型；多文件：application/zip，均带 Content-Disposition: attachment）
 
 - DELETE /api/task/{task_id}（需鉴权）
   - 作用：删除任务并清理生成文件
