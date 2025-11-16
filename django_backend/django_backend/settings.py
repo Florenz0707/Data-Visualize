@@ -78,9 +78,12 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
 # Celery stability and reliability settings
-CELERY_BROKER_HEARTBEAT = int(os.environ.get("CELERY_BROKER_HEARTBEAT", 60))
+CELERY_BROKER_HEARTBEAT = int(os.environ.get("CELERY_BROKER_HEARTBEAT", 30))
 CELERY_BROKER_CONNECTION_TIMEOUT = int(os.environ.get("CELERY_BROKER_CONNECTION_TIMEOUT", 30))
 CELERY_BROKER_POOL_LIMIT = int(os.environ.get("CELERY_BROKER_POOL_LIMIT", 20))
+# Retry behavior
+CELERY_BROKER_CONNECTION_MAX_RETRIES = int(os.environ.get("CELERY_BROKER_CONNECTION_MAX_RETRIES", 0))  # 0=infinite
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 # Ensure tasks are only acknowledged after successful execution
 CELERY_TASK_ACKS_LATE = True
@@ -100,6 +103,8 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
     "retry_on_timeout": True,
     # Ensure messages become visible again if a worker dies holding them
     "visibility_timeout": 3600,
+    # Health check PING interval to keep connections alive
+    "health_check_interval": 25,
 }
 
 # Do not hijack Django's root logger
