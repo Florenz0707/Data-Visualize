@@ -2,7 +2,7 @@ from ninja import NinjaAPI
 from ninja.errors import HttpError
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.utils import timezone
 from django.conf import settings
 from .schemas import (
@@ -30,7 +30,7 @@ def register(request: HttpRequest, payload: RegisterIn):
 
 
 @api.post("/login", response={200: LoginOut})
-def login(request: HttpRequest, payload: LoginIn):
+def login(request: HttpRequest, payload: LoginIn, response: HttpResponse):
     user = User.objects.filter(username=payload.username).first()
     if not user or not check_password(payload.password, user.password):
         raise HttpError(401, "Invalid credentials")
@@ -38,11 +38,16 @@ def login(request: HttpRequest, payload: LoginIn):
     access = create_access_token(user)
     refresh = create_refresh_token(user)
 
-    # Set refresh token cookie
-    request._request._ninja_response_headers = {
-        "Set-Cookie": f"{settings.REFRESH_COOKIE_NAME}={refresh}; Path=/; HttpOnly; SameSite=Lax"
-    }
-
+    # Properly set refresh token cookie on the response
+    response.set_cookie(
+        settings.REFRESH_COOKIE_NAME,
+        refresh,
+        path="/",
+        httponly=True,
+        samesite="Lax",
+        secure=getattr(settings, "REFRESH_COOKIE_SECURE", False),
+        max_age=getattr(settings, "REFRESH_TOKEN_LIFETIME", 7*24*3600),
+    )
     return LoginOut(access_token=access)
 
 
