@@ -66,7 +66,8 @@ STATIC_URL = "/static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Storage roots for generated assets (reuse project root generated_stories directory)
-GENERATED_ROOT = (BASE_DIR.parent / "generated_stories").resolve()
+# Store generated assets within django_backend directory by default
+GENERATED_ROOT = (BASE_DIR / "generated_stories").resolve()
 GENERATED_ROOT.mkdir(parents=True, exist_ok=True)
 
 # Token lifetimes (seconds)

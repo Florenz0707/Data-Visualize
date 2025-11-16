@@ -15,8 +15,15 @@ class WorkflowRunner:
                  base_config_path: Path | None = None,
                  models_config_path: Path | None = None):
         self.project_root = project_root or Path(__file__).resolve().parents[3]
-        self.base_config_path = base_config_path or (self.project_root / "configs" / "mm_story_agent.yaml")
-        self.models_config_path = models_config_path or (self.project_root / "configs" / "models.yaml")
+        # Resolve config paths with fallback: configs/* then config/*
+        def _resolve_cfg(path: Path, alt: Path) -> Path:
+            return path if path.exists() else alt
+        default_main = self.project_root / "configs" / "mm_story_agent.yaml"
+        alt_main = self.project_root / "config" / "mm_story_agent.yaml"
+        default_models = self.project_root / "configs" / "models.yaml"
+        alt_models = self.project_root / "config" / "models.yaml"
+        self.base_config_path = Path(base_config_path) if base_config_path else _resolve_cfg(default_main, alt_main)
+        self.models_config_path = Path(models_config_path) if models_config_path else _resolve_cfg(default_models, alt_models)
         self.model_config = get_model_config_instance(str(self.models_config_path))
         # Load base config once
         import yaml
@@ -131,6 +138,8 @@ class WorkflowRunner:
         if segmented_pages is None:
             segmented_pages = script.get("segmented_pages")
         params = compose_cfg.get("params", {}).copy()
+        # Always use task-specific story_dir instead of config default
+        params["story_dir"] = str(Path(story_dir))
         params["pages"] = pages
         if segmented_pages:
             params["segmented_pages"] = segmented_pages

@@ -15,43 +15,19 @@ warnings.filterwarnings(
     module=r"torch\.nn\.utils\.weight_norm",
 )
 
-import nls
-import requests
-from aliyunsdkcore.client import AcsClient
-from aliyunsdkcore.request import CommonRequest
+# Lazy imports for optional providers are moved inside class methods to avoid hard deps
 
 from ..base import register_tool
 from ..video_compose_agent import split_text_for_speech
 
 
 class CosyVoiceSynthesizer:
-
-    def __init__(self) -> None:
-        self.access_key_id = os.environ.get('ALIYUN_ACCESS_KEY_ID')
-        self.access_key_secret = os.environ.get('ALIYUN_ACCESS_KEY_SECRET')
-        self.app_key = os.environ.get('ALIYUN_APP_KEY')
-        self.setup_token()
-
-    def setup_token(self):
-        client = AcsClient(self.access_key_id, self.access_key_secret,
-                           'cn-shanghai')
-        request = CommonRequest()
-        request.set_method('POST')
-        request.set_domain('nls-meta.cn-shanghai.aliyuncs.com')
-        request.set_version('2019-02-28')
-        request.set_action_name('CreateToken')
-
-        try:
-            response = client.do_action_with_exception(request)
-            jss = json.loads(response)
-            if 'Token' in jss and 'Id' in jss['Token']:
-                token = jss['Token']['Id']
-                self.token = token
-        except Exception as e:
-            import traceback
-            raise RuntimeError(
-                f'Request token failed with error: {e}, with detail {traceback.format_exc()}'
-            )
+    """Deprecated Aliyun NLS-based synthesizer placeholder.
+    This project no longer bundles the NLS SDK. Please switch speech provider to 'local' (kokoro)
+    or 'transformers' in configs/mm_story_agent.yaml -> speech_generation.model.
+    """
+    def __init__(self, *args, **kwargs) -> None:
+        pass
 
     def split_text(self, text, max_length=280):
         if len(text) <= max_length:
@@ -281,22 +257,20 @@ class SpeechAgent:
         pages: List = params["pages"]
         save_path = params["save_path"]
         synthesizer_map = {
-            'dashscope': CosyVoiceSynthesizer,
-            'custom_api': NeuttAirSynthesizer,
-            'transformers': TransformersSynthesizer,
+            # Default to local Kokoro for 'dashscope'/'cosyvoice' legacy values
+            'dashscope': KokoroSynthesizer,
+            'cosyvoice': KokoroSynthesizer,
             'local': KokoroSynthesizer,
-            'cosyvoice': CosyVoiceSynthesizer,
-            'neutt_air': NeuttAirSynthesizer,
             'kokoro': KokoroSynthesizer,
+            'transformers': TransformersSynthesizer,
+            'custom_api': NeuttAirSynthesizer,
+            'neutt_air': NeuttAirSynthesizer,
         }
         synthesizer_class = synthesizer_map.get(self.model_name)
         if synthesizer_class:
-            if self.model_name in ('dashscope', 'cosyvoice'):
-                generation_agent = CosyVoiceSynthesizer()
-            else:
-                generation_agent = synthesizer_class(self.cfg)
+            generation_agent = synthesizer_class(self.cfg)
         else:
-            raise ValueError(f"Unsupported speech model or provider: '{self.model_name}'")
+            raise ValueError(f"Unsupported speech model or provider: '{self.model_name}'. Try 'kokoro' or 'transformers'.")
 
         segmented_pages = params.get("segmented_pages", None)
         if segmented_pages is None:

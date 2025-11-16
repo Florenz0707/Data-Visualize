@@ -1,14 +1,15 @@
 register_map = {
-    'qwen': 'modality_agents.llm.QwenAgent',
-    'qa_outline_story_writer': 'modality_agents.story_agent.QAOutlineStoryWriter',
-    'musicgen_t2m': 'MusicGenAgent',
-    'story_diffusion_t2i': 'modality_agents.image_agent.StoryDiffusionAgent',
-    'cosyvoice_tts': 'CosyVoiceAgent',
-    'audioldm2_t2a': 'AudioLDM2Agent',
-    'slideshow_video_compose': 'video_compose_agent.SlideshowVideoComposeAgent',
-    'freesound_sfx_retrieval': 'FreesoundSfxAgent',
-    'freesound_music_retrieval': 'FreesoundMusicAgent',
-    'speech_generation': 'modality_agents.speech_agent.SpeechAgent',
+    # Map tool names to module paths (modules will self-register classes via @register_tool)
+    'qwen': 'modality_agents.llm',
+    'qa_outline_story_writer': 'modality_agents.story_agent',
+    'musicgen_t2m': 'MusicGenAgent',  # placeholder if needed
+    'story_diffusion_t2i': 'modality_agents.image_agent',
+    'cosyvoice_tts': 'CosyVoiceAgent',  # placeholder if needed
+    'audioldm2_t2a': 'AudioLDM2Agent',  # placeholder if needed
+    'slideshow_video_compose': 'video_compose_agent',
+    'freesound_sfx_retrieval': 'FreesoundSfxAgent',  # placeholder if needed
+    'freesound_music_retrieval': 'FreesoundMusicAgent',  # placeholder if needed
+    'speech_generation': 'modality_agents.speech_agent',
 }
 
 

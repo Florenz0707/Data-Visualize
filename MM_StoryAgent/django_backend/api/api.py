@@ -1,23 +1,23 @@
-from ninja import NinjaAPI
-from ninja.errors import HttpError
-from django.contrib.auth.models import User
-from django.contrib.auth.hashers import make_password, check_password
-from django.http import HttpRequest, HttpResponse
+from pathlib import Path
+from typing import List
 
 from django.conf import settings
-from .schemas import (
-    RegisterIn, RegisterOut, LoginIn, LoginOut,
-    WorkflowItem, TaskNewIn, TaskNewOut, TaskProgressOut,
-    TaskListOut, ResourceOut, ExecuteOut,
-)
+from django.contrib.auth.hashers import make_password, check_password
+from django.contrib.auth.models import User
+from django.http import HttpRequest
+from ninja import NinjaAPI
+from ninja.errors import HttpError
+
 from .auth import (
     create_access_token, create_refresh_token,
     auth_from_header, verify_refresh_token,
 )
 from .models import Task, TaskSegment, Resource, WorkflowDefinition
-from pathlib import Path
-from typing import List
-
+from .schemas import (
+    RegisterIn, RegisterOut, LoginIn, LoginOut,
+    WorkflowItem, TaskNewIn, TaskNewOut, TaskProgressOut,
+    TaskListOut, ResourceOut, ExecuteOut,
+)
 # Import real workflow runner (ensure api/services is a package)
 from .services.workflow import WorkflowRunner
 
@@ -33,27 +33,27 @@ def register(request: HttpRequest, payload: RegisterIn):
 
 
 @api.post("/login", response={200: LoginOut})
-def login(request: HttpRequest, payload: LoginIn, response: HttpResponse):
+def login(request: HttpRequest, payload: LoginIn):
     user = User.objects.filter(username=payload.username).first()
     if not user or not check_password(payload.password, user.password):
         raise HttpError(401, "Invalid credentials")
 
-    access = create_access_token(user)
-    refresh = create_refresh_token(user)
+    access_token = create_access_token(user)
+    refresh_token = create_refresh_token(user)
 
     # Build response and set cookie (no extra response param needed)
-    data = LoginOut(access_token=access).dict()
-    resp = api.create_response(request, data, status=200)
-    resp.set_cookie(
+    data = LoginOut(access_token=access_token).model_dump()
+    response = api.create_response(request, data, status=200)
+    response.set_cookie(
         settings.REFRESH_COOKIE_NAME,
-        refresh,
+        refresh_token,
         path="/",
         httponly=True,
         samesite="Lax",
         secure=getattr(settings, "REFRESH_COOKIE_SECURE", False),
         max_age=getattr(settings, "REFRESH_TOKEN_LIFETIME", 7*24*3600),
     )
-    return resp
+    return response
 
 
 @api.post("/refresh", response={200: LoginOut})
@@ -150,7 +150,7 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
 
     try:
         if segmentId == 1:
-            pages = runner.run_story(task.story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene)
+            runner.run_story(task.story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene)
             script_path = str(Path(task.story_dir) / "script_data.json")
             _record_resources(task, 1, [script_path], rtype="json")
         elif segmentId == 2:

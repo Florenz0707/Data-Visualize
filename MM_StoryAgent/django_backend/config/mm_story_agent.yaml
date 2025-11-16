@@ -1,0 +1,114 @@
+# ==================== 全局配置 ====================
+# 模型配置文件路径
+models_config: configs/models.yaml
+
+# 故事输出目录
+story_dir: &story_dir generated_stories/example
+
+
+# ==================== 故事生成 ====================
+story_writer:
+    tool: qa_outline_story_writer
+    model: qwen3-max  # 使用的LLM模型（从models.yaml中选择）
+    cfg:
+        max_conv_turns: 3
+        num_outline: 4
+        temperature: 0.5
+        max_pages: 3  # 最大页面数（用于测试）
+    params:
+        story_topic: "Magnet Mania - Introduction to magnets and how they work."
+        main_role: "Little Girl Penny"
+        scene: "(no scene specified)"
+
+
+# ==================== 语音合成 ====================
+speech_generation:
+    tool: speech_generation
+    model: kokoro  # 使用的TTS模型（从models.yaml中选择）
+    # 可选模型: cosyvoice, kokoro, speecht5, neutt_air
+    cfg:
+        # 模型特定参数会从models.yaml自动加载
+        # 也可以在这里覆盖默认参数
+        sample_rate: 24000
+        lang_code: "a"  # kokoro特定参数
+    params:
+        voice: "af_heart"
+
+
+# ==================== 图像生成 ====================
+image_generation:
+    tool: story_diffusion_t2i
+    model: wanx_v1  # 使用的图像生成模型（从models.yaml中选择）
+    # 可选模型: wanx_v1, dalle_3, dalle_2, sdxl, sdxl_replicate
+    llm_model: qwen3-max  # 用于生成图像提示词的LLM模型
+    cfg:
+        num_turns: 3  # 提示词优化轮数
+        height: &image_height 720
+        width: &image_width 1280
+    params:
+        seed: 112536
+        style_name: "Japanese Anime" 
+        # 可选风格: '(No style)', 'Japanese Anime', 'Digital/Oil Painting', 
+        # 'Pixar/Disney Character', 'Photographic', 'Comic book', 'Line art', 
+        # 'Black and White Film Noir', 'Isometric Rooms', 'Storybook'
+
+
+# ==================== 视频合成 ====================
+video_compose:
+    tool: slideshow_video_compose
+    cfg:
+        {}
+    params:
+        height: *image_height
+        width: *image_width
+        story_dir: *story_dir
+        fps: 24
+        audio_sample_rate: 44100
+        audio_codec: aac
+        caption:
+            font: resource/font/FiraCode-Regular.ttf
+            # bg_color: LightGrey
+            fontsize: 28
+            color: white
+            # stroke_color: white
+            # stroke_width: 0.5
+            max_length: 50
+            max_words_per_line: 10  # 每行字幕的最大单词数（兼容旧配置）
+            max_chars_per_line: 75   # 每行字幕的最大字符数（新配置，优先于 max_words_per_line）
+            workers: 4  # 并行字幕渲染线程数
+            enable_captions: true  # 启用字幕（默认）
+        slideshow_effect:
+            fade_duration: 0.5
+            slide_duration: 0.2
+            zoom_speed: 0.5
+            move_ratio: 0.9
+
+
+# ==================== 可选：音乐生成 ====================
+# music_generation:
+#     tool: musicgen_t2m
+#     model: musicgen  # 使用的音乐生成模型
+#     cfg:
+#         duration: 30
+#     params:
+#         prompt: "peaceful background music for children's story"
+
+
+# ==================== 可选：音效生成 ====================
+# sound_generation:
+#     tool: audioldm2_t2a
+#     model: audioldm2  # 使用的音效生成模型
+#     cfg:
+#         num_inference_steps: 200
+#     params:
+#         prompts: ["birds chirping", "door opening"]
+
+
+# ==================== 可选：FreeSound检索 ====================
+# freesound_sfx:
+#     tool: freesound_sfx_retrieval
+#     model: freesound_sfx
+#     cfg:
+#         max_results: 5
+#     params:
+#         queries: ["footsteps", "wind blowing"]
