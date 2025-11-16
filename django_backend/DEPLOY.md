@@ -1,167 +1,203 @@
-# 部署指南（Windows + WSL）
+# 部署指南（Windows + WSL 与 Linux）
 
-本指南面向在 Windows 主机上运行 Django/Celery、在 WSL（建议 Ubuntu，WSL2）中运行 Redis 的开发/准生产环境。涵盖环境准备、启动顺序、验证方法与常见问题排查。请在阅读前先通读 README.md 了解项目功能与组件。
+本指南面向在 Windows+WSL 或原生 Linux 上运行 Django（ASGI）+ Celery + Redis 的环境。涵盖环境准备、启动顺序、验证方法与常见问题排查。请在阅读前先通读 README.md 了解项目功能与组件。
 
-一、总体架构
-- Windows 主机：
-  - Python 虚拟环境
-  - Django（ASGI 模式）
-  - Celery worker（Windows 推荐使用 solo 池）
-- WSL（Ubuntu 例）：
-  - Redis（作为 Celery broker + result backend，同时用于 Pub/Sub 通知）
+---
 
-二、前置条件
-- Windows 10/11 + WSL2（推荐）
-- 已安装 WSL 发行版（建议 Ubuntu）
-- Git、Python 3.13+（在 Windows 侧）
-- 可选：Node/npm（若使用 wscat 测试 WebSocket）
+## 一、总体架构
+- Django（ASGI）：提供 REST API 与 WebSocket 网关（Channels）
+- Celery：执行异步任务（Redis 作为 broker 与 result backend）
+- Redis：消息队列与 Pub/Sub（WebSocket 通知转发）
+- 生成资源：默认写入项目内 django_backend/generated_stories
 
-三、克隆与目录结构
-- 在 Windows 上克隆仓库。
-- 主要服务端项目路径即该目录。
+建议：Django、Celery、Redis 放在同一 Linux 栈（同机/容器/WSL 内）最稳定。
 
-四、WSL 中安装与启动 Redis
-1) 打开 WSL 终端（Ubuntu）：
-- sudo apt update
+---
+
+## 二、Linux 部署（推荐）
+
+### 2.1 前置条件
+- Linux 发行版（Ubuntu 20.04+/Debian/CentOS 等）
+- Python 3.10+（项目当前 requires-python: ">=3.13"，请以实际环境为准）
+- 可选：Nginx 作为反向代理（生产）
+
+### 2.2 系统依赖
+```bash
+sudo apt update
+sudo apt install -y python3-venv python3-dev build-essential \
+  ffmpeg libsndfile1 redis-server
+```
+
+### 2.3 获取代码并创建虚拟环境
+```bash
+# 建议放在非 root 家目录
+mkdir -p ~/apps && cd ~/apps
+# 假设已将仓库放到此处
+# git clone <repo> django_backend
+cd django_backend
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 2.4 安装依赖
+- 使用 uv（推荐）：
+```bash
+# 如未安装 uv：curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync
+```
+- 或使用 pip：
+```bash
+pip install -U pip
+pip install -e .
+```
+
+### 2.5 配置环境变量
+- 可在 config/.env 写入（settings.py 会自动尝试加载）：
+```
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+REDIS_URL=redis://localhost:6379/0
+DJANGO_SECRET_KEY=<your-secret>
+# 可选：ACCESS_TOKEN_LIFETIME、REFRESH_TOKEN_LIFETIME 等
+```
+
+- Redis（本机）默认安装后即监听 6379，无需额外配置。生产建议：/etc/redis/redis.conf 中设定
+  - timeout 0
+  - tcp-keepalive 300
+
+### 2.6 初始化数据库
+```bash
+python manage.py migrate
+```
+
+### 2.7 启动顺序与运行命令
+1) 启动 Redis（系统服务）：
+```bash
+sudo systemctl enable --now redis-server
+# 验证
+redis-cli ping
+```
+
+2) 启动 Celery worker：
+```bash
+source .venv/bin/activate
+celery -A django_backend worker --loglevel=INFO --concurrency=2 -Ofair
+```
+
+3) 启动 ASGI（Uvicorn 或 Daphne）：
+```bash
+# Uvicorn（开发/生产均可，生产建议配合 Nginx）
+uvicorn django_backend.asgi:application --host 0.0.0.0 --port 8000 --log-level info
+
+# 或 Daphne
+# daphne -b 0.0.0.0 -p 8000 django_backend.asgi:application
+```
+
+### 2.8 可选：systemd 服务示例
+- /etc/systemd/system/celery.service
+```
+[Unit]
+Description=Celery Worker
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/apps/django_backend
+Environment="PATH=/home/YOUR_USER/apps/django_backend/.venv/bin"
+ExecStart=/home/YOUR_USER/apps/django_backend/.venv/bin/celery -A django_backend worker --loglevel=INFO --concurrency=2 -Ofair
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+- /etc/systemd/system/uvicorn.service
+```
+[Unit]
+Description=Uvicorn ASGI Server
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/apps/django_backend
+Environment="PATH=/home/YOUR_USER/apps/django_backend/.venv/bin"
+ExecStart=/home/YOUR_USER/apps/django_backend/.venv/bin/uvicorn django_backend.asgi:application --host 0.0.0.0 --port 8000 --log-level info
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用并查看状态：
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now celery.service uvicorn.service
+sudo systemctl status celery.service uvicorn.service
+```
+
+### 2.9 Nginx 反向代理（可选）
+```nginx
+server {
+    listen 80;
+    server_name your.domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+---
+
+## 三、Windows + WSL 开发/准生产（原文）
+
+本节为原有指南（保留）。若在 Windows 运行 Django/Celery、在 WSL 中运行 Redis，请参考：
+
+1) WSL 中安装与启动 Redis
 - sudo apt install -y redis-server
+- redis-server 或 sudo redis-server --daemonize yes
 
-2) 启动 Redis（二选一）
-- 前台启动（便于观察日志）：
-  - redis-server
-- 后台守护（未启用 systemd 的常见方式）：
-  - sudo redis-server --daemonize yes
+2) Windows 侧安装依赖并启动服务
+- Python venv + pip/uv 安装
+- Celery（Windows 上建议 threads/solo）
+  - celery -A django_backend worker --loglevel=INFO --pool=threads --concurrency=2 -Ofair
+- ASGI（Uvicorn）
+  - uvicorn django_backend.asgi:application --host 127.0.0.1 --port 8000 --reload
 
-3) 基本验证（在 WSL 内）：
-- redis-cli ping → PONG
-- ss -lntp | grep 6379 → 确认 6379 端口监听
+3) 注意事项
+- 跨栈（Windows↔WSL）长连接可能更易断开，建议最终迁移到单一 Linux 栈。
+- 保持路径一致性，确保 GENERATED_ROOT 双侧可读写。
 
-说明：WSL2 默认支持 localhost 端口直通，Windows 可用 127.0.0.1:6379 连接 WSL 的 Redis。
+---
 
-五、Windows 侧安装 Python 依赖
-1) 打开 PowerShell，进入项目根目录。
+## 四、连通性与功能验证
+- Redis 连通：`redis-cli ping` → PONG
+- Celery 自检：`celery -A django_backend inspect ping`
+- 登录→建任务→逐段执行（1..5），观察 202 返回与 WS 通知
+- 资源下载接口验证：单文件/ZIP 下载
 
-2) 创建并激活虚拟环境：
-- python -m venv .venv
-- .\.venv\Scripts\activate
+---
 
-3) 安装依赖（任选其一）
-- pip install -U pip
-- pip install -e .
-- 或使用 uv：
-  - uv venv（首次）
-  - .\.venv\Scripts\activate
-  - uv sync
+## 五、常见问题排查
+- 断线重连与任务中断：本项目已在 settings.py 中启用心跳、健康检查与任务丢失防护；建议在同一 Linux 栈内运行。
+- 依赖缺失：音视频/语音任务需要 ffmpeg、libsndfile 等库
+- 权限问题：生成目录需可写；systemd 服务需指向正确的 venv PATH
+- WebSocket 失败：确认使用 ASGI 服务器（Uvicorn/Daphne）与正确的 token
 
-4) 可选安装 ASGI 服务器：
-- pip install daphne
-- 或：pip install uvicorn[standard]
+---
 
-六、Django 配置核对与迁移
-- 打开 django_backend/settings.py 核对：
-  - CELERY_BROKER_URL=redis://localhost:6379/0
-  - CELERY_RESULT_BACKEND=redis://localhost:6379/1
-  - REDIS_URL=redis://localhost:6379/0
-  - INSTALLED_APPS 包含 channels、django_celery_results
-  - CHANNEL_LAYERS.default 指向 REDIS_URL
-- 迁移数据库：
-  - python manage.py migrate
-
-七、启动顺序（推荐）
-1) 启动 Redis（WSL）
-- 见第四部分。
-
-2) 启动 Celery（Windows）
-- Windows 上建议使用 solo 池：
-  - celery -A django_backend worker -l info -P solo --concurrency 1
-- 如需简化命令，可在 django_backend/celery.py 中检测 os.name=="nt" 时自动设置 app.conf.worker_pool="solo"。
-
-3) 启动 ASGI 服务器（Windows，推荐 Uvicorn）
-- 开发调试（热重载 + 详细日志）：
-  - uvicorn django_backend.asgi:application --host 127.0.0.1 --port 8000 --reload --log-level debug
-- 普通运行：
-  - uvicorn django_backend.asgi:application --host 127.0.0.1 --port 8000
-
-说明：
-- 使用 ASGI 服务器后，不要再同时运行 runserver 占用相同端口以免冲突。
-- HTTP API 前缀为 /api，WebSocket 路径为 /ws/notifications。
-
-八、连通性与功能验证
-1) Redis 连通（Windows 侧）
-- PowerShell：Test-NetConnection 127.0.0.1 -Port 6379 → True
-- Python（在 venv 中）：
-  - python -c "import redis; print(redis.from_url('redis://localhost:6379/0').ping())" → True
-
-2) Celery 自检（Windows 侧）
-- celery -A django_backend inspect ping → 输出含 \"ok\": \"pong\"
-
-3) 脚本辅助（Test目录下）
-- Windows Powershell: RedisTest.bat
-- Git Bash：bash ThirdTest.sh（只发送 HTTP 请求，登录→建任务→触发执行段）
-
-4) WebSocket 测试（实时通知）
-- 获取 access_token：POST /api/login
-- 连接：ws://127.0.0.1:8000/ws/notifications?token=<access_token>
-  - wscat -c "ws://127.0.0.1:8000/ws/notifications?token=..."
-- 触发执行：POST /api/task/{task_id}/execute/1
-- 观察 WS 收到的 JSON 通知（segment_finished/segment_failed）
-
-九、常见部署变体
-A) 在 WSL 中运行 Celery worker（避免 Windows 多进程问题）
-- 在 WSL 中为项目单独创建虚拟环境并安装依赖：
-  - python3 -m venv .venv && source .venv/bin/activate
-  - pip install -U pip && pip install -e .
-- 切换到挂载路径（/mnt/d/...）项目根目录：
-  - cd /mnt/d/_Files/_Lessons/Data-Visualize/django_backend
-- 启动 worker：
-  - celery -A django_backend worker -l info
-- 注意：Django 可以继续在 Windows 上运行，任务通过 Redis 在 WSL worker 消费。磁盘路径建议统一（都从 /mnt/d/... 启动），以避免路径差异。
-
-B) 全部在 WSL 中运行（更接近 Linux 生产环境）
-- 在 WSL 中安装依赖、迁移和运行 daphne/uvicorn + Celery + Redis。
-- Windows 仅用于编辑代码与浏览器访问。
-
-十、环境变量与配置建议
-- 生产/准生产建议使用 .env 注入敏感配置（API Key、模型配置）。
-- 常用变量：
-  - CELERY_BROKER_URL
-  - CELERY_RESULT_BACKEND
-  - REDIS_URL
-  - ACCESS_TOKEN_LIFETIME、REFRESH_TOKEN_LIFETIME
-- 根据需求调整 Django SECRET_KEY、ALLOWED_HOSTS、DEBUG 等。
-
-十一、故障排查
-- Windows Celery 报错 WinError 5：
-  - 使用 -P solo --concurrency 1；或把 worker 放在 WSL。
-- WebSocket 连接失败：
-  - 确保使用 daphne/uvicorn；token 未过期；端口/防火墙放通。
-- 收不到通知：
-  - 确定 Celery 正在消费；在 WSL 里执行 redis-cli SUBSCRIBE "user:{user_id}" 观察是否发布；核对 REDIS_URL。
-- 接口返回 401：
-  - 确认 Authorization: Bearer <access_token> 头；或通过 /api/refresh 获取新 token。
-- 视频/音频生成失败：
-  - 查看 Celery worker 日志；核对 mm_story_agent.yaml、models.yaml 配置与对应模型、外部服务 API Key。
-
-十二、日常运维建议
-- 日志：
-  - Celery worker 加 -l info/debug 观察队列与错误
-  - ASGI 服务器日志关注 101/异常堆栈
-- 备份：
-  - 生成内容位于 generated_stories/<task_id>，如需持久化请定期备份
-- 安全：
-  - 仅在可信网络暴露 Redis；如需跨主机访问，务必加固访问策略
-- 监控（可选）：
-  - Flower 监控 Celery（pip install flower；flower -A django_backend）
-
-十三、常用命令速查
-- 启动 Celery（Windows，solo）：
-  - celery -A django_backend worker -l info -P solo --concurrency 1
-- 启动 ASGI（Daphne）：
-  - daphne -p 8000 django_backend.asgi:application
-- 启动 ASGI（Uvicorn）：
-  - uvicorn django_backend.asgi:application --host 127.0.0.1 --port 8000
-- Redis 订阅（WSL）：
-  - redis-cli SUBSCRIBE "user:{user_id}"
-
-附：快速自检脚本
-- Windows：RedisTest.bat → 批处理版检测
-- Git Bash：bash ThirdTest.sh → 仅 HTTP 调用验证异步入队与 202 返回
+## 六、命令速查
+- 迁移数据库：`python manage.py migrate`
+- 启动 Celery：`celery -A django_backend worker --loglevel=INFO --concurrency=2 -Ofair`
+- 启动 ASGI（Uvicorn）：`uvicorn django_backend.asgi:application --host 0.0.0.0 --port 8000`
+- 订阅 Redis 通知：`redis-cli SUBSCRIBE "user:{user_id}"`
