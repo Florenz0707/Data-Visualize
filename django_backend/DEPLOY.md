@@ -75,13 +75,14 @@
   - celery -A django_backend worker -l info -P solo --concurrency 1
 - 如需简化命令，可在 django_backend/celery.py 中检测 os.name=="nt" 时自动设置 app.conf.worker_pool="solo"。
 
-3) 启动 ASGI 服务器（Windows）
-- 选择其一：
-  - daphne -p 8000 django_backend.asgi:application
+3) 启动 ASGI 服务器（Windows，推荐 Uvicorn）
+- 开发调试（热重载 + 详细日志）：
+  - uvicorn django_backend.asgi:application --host 127.0.0.1 --port 8000 --reload --log-level debug
+- 普通运行：
   - uvicorn django_backend.asgi:application --host 127.0.0.1 --port 8000
 
 说明：
-- 内置 runserver 并不能承载 WebSocket；请使用 daphne/uvicorn。
+- 使用 ASGI 服务器后，不要再同时运行 runserver 占用相同端口以免冲突。
 - HTTP API 前缀为 /api，WebSocket 路径为 /ws/notifications。
 
 八、连通性与功能验证

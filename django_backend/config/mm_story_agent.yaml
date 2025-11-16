@@ -17,7 +17,7 @@ story_writer:
         max_pages: 3  # 最大页面数（用于测试）
     params:
         story_topic: "Magnet Mania - Introduction to magnets and how they work."
-        main_role: "Little Girl Penny"
+        main_role: "(no role specified)"
         scene: "(no scene specified)"
 
 
@@ -47,9 +47,9 @@ image_generation:
         width: &image_width 1280
     params:
         seed: 112536
-        style_name: "Japanese Anime" 
-        # 可选风格: '(No style)', 'Japanese Anime', 'Digital/Oil Painting', 
-        # 'Pixar/Disney Character', 'Photographic', 'Comic book', 'Line art', 
+        style_name: "Japanese Anime"
+        # 可选风格: '(No style)', 'Japanese Anime', 'Digital/Oil Painting',
+        # 'Pixar/Disney Character', 'Photographic', 'Comic book', 'Line art',
         # 'Black and White Film Noir', 'Isometric Rooms', 'Storybook'
 
 

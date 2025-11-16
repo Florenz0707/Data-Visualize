@@ -57,14 +57,24 @@ class WorkflowRunner:
         cfg = dict(self.base_cfg["story_writer"])  # shallow copy
         merged_cfg = load_model_for_agent(cfg, 'llm')
         writer = init_tool_instance({"tool": cfg["tool"], "cfg": merged_cfg})
-        params = cfg.get("params", {}).copy()
-        if topic:
-            params["story_topic"] = topic
-        if main_role:
-            params["main_role"] = main_role
-        if scene:
-            params["scene"] = scene
-        pages: List[str] = writer.call(params)
+
+        # Build story setting string, prioritize user input over config defaults
+        default_params = cfg.get("params", {}) or {}
+        _topic = topic or default_params.get("story_topic", "")
+        _role = main_role or default_params.get("main_role", "")
+        _scene = scene or default_params.get("scene", "")
+
+        parts = []
+        if _topic:
+            parts.append(f"Topic: {_topic}")
+        if _role:
+            parts.append(f"Main role: {_role}")
+        if _scene:
+            parts.append(f"Scene: {_scene}")
+        story_setting = "; ".join(parts) if parts else str(default_params)
+
+        # Pass a single consolidated setting string to story agent
+        pages: List[str] = writer.call(story_setting)
         script = {"pages": [{"story": p} for p in pages]}
         self._save_script(Path(story_dir), script)
         return pages
