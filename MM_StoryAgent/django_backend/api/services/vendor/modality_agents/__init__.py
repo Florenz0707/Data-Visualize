@@ -1,2 +1,0 @@
-# Vendored modality agents package
-
