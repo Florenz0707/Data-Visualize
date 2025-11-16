@@ -4,4 +4,3 @@ def parse_list(output):
         return isinstance(pages, list)
     except Exception:
         return False
-

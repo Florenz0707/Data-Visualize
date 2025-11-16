@@ -1,38 +1,16 @@
 import platform
-import random
 import re
 import signal
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from datetime import timedelta
 from pathlib import Path
-from typing import List, Union
 
-import cv2
-import librosa
-import numpy as np
-from moviepy.audio.AudioClip import AudioArrayClip
-from moviepy.audio.AudioClip import concatenate_audioclips
+from moviepy import vfx
 
-try:
-    from moviepy import vfx
-    slide_in = vfx.slide_in
-    slide_out = vfx.slide_out
-except Exception:
-    def slide_in(clip):
-        return clip
-    def slide_out(clip):
-        return clip
-
-from moviepy.video.VideoClip import ImageClip, ColorClip, VideoClip
-from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.video.tools.subtitles import SubtitlesClip
-from tqdm import trange, tqdm
+slide_in = vfx.SlideIn
+slide_out = vfx.SlideOut
 
 from .base import register_tool
+
 
 # (The rest of this file is a vendored copy adapted to use local imports only.)
 # For brevity, the implementation mirrors the original with no functional changes
@@ -43,8 +21,10 @@ def timeout_context(seconds):
     if platform.system() == 'Windows':
         import threading
         timeout_occurred = threading.Event()
+
         def timeout_handler():
             timeout_occurred.set()
+
         timer = threading.Timer(seconds, timeout_handler)
         timer.start()
         try:
@@ -56,6 +36,7 @@ def timeout_context(seconds):
     else:
         def timeout_handler(signum, frame):
             raise TimeoutError(f"Operation timed out after {seconds} seconds")
+
         old_handler = signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(seconds)
         try:
@@ -63,6 +44,7 @@ def timeout_context(seconds):
         finally:
             signal.alarm(0)
             signal.signal(signal.SIGALRM, old_handler)
+
 
 # The following functions/classes are identical to the original vendor source
 # except for relative imports above.
@@ -219,6 +201,7 @@ def split_text_for_speech(text, max_words=20):
 class SlideshowVideoComposeAgent:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
+
     def adjust_caption_config(self, width, height, existing: dict | None = None):
         existing = dict(existing or {})
         area_height_default = int(height * 0.06)
@@ -228,6 +211,7 @@ class SlideshowVideoComposeAgent:
         if "fontsize" not in existing:
             existing["fontsize"] = fontsize_default
         return existing
+
     def call(self, params):
         # For vendor minimal prototype, we don't implement full compose to avoid heavy ffmpeg path.
         # Users can still call this, but if moviepy/ffmpeg not available, they should handle errors upstream.
@@ -238,4 +222,3 @@ class SlideshowVideoComposeAgent:
         output.touch(exist_ok=True)
         print(f"[Vendor] SlideshowVideoComposeAgent: created placeholder video at {output}")
         return str(output)
-

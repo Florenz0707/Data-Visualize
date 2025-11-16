@@ -1,5 +1,5 @@
-from datetime import timedelta
-from typing import Optional, Tuple
+from typing import Optional
+
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import signing
@@ -32,7 +32,8 @@ def verify_access_token(token: str) -> Optional[User]:
 
 def verify_refresh_token(token: str) -> Optional[User]:
     try:
-        data = signing.loads(token, salt=REFRESH_SALT, max_age=getattr(settings, "REFRESH_TOKEN_LIFETIME", 7*24*3600))
+        data = signing.loads(token, salt=REFRESH_SALT,
+                             max_age=getattr(settings, "REFRESH_TOKEN_LIFETIME", 7 * 24 * 3600))
         uid = data.get("uid")
         return User.objects.filter(id=uid).first()
     except signing.BadSignature:
@@ -48,4 +49,3 @@ def auth_from_header(auth_header: Optional[str]) -> Optional[User]:
     if len(parts) == 2 and parts[0].lower() == "bearer":
         return verify_access_token(parts[1])
     return None
-

@@ -93,7 +93,7 @@
 2) Celery 自检（Windows 侧）
 - celery -A django_backend inspect ping → 输出含 \"ok\": \"pong\"
 
-3) 脚本辅助（项目根）
+3) 脚本辅助（Test目录下）
 - Windows Powershell: RedisTest.bat
 - Git Bash：bash ThirdTest.sh（只发送 HTTP 请求，登录→建任务→触发执行段）
 

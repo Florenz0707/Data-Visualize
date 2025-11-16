@@ -102,6 +102,7 @@ REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_SECURE = False
 REFRESH_COOKIE_HTTPONLY = True
 
+
 # --- Load .env for model/API keys on server startup ---
 # Prefer standard path "configs/.env"; also try "config/.env" for user convenience
 # Avoid external dependencies to keep settings self-contained
@@ -122,6 +123,27 @@ def _load_env_file(path):
     except FileNotFoundError:
         pass
 
-_repo_root = BASE_DIR.parent
-_load_env_file(_repo_root / "configs/.env")
-_load_env_file(_repo_root / "config/.env")
+
+_load_env_file(BASE_DIR / "config/.env")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {"format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+    },
+    "loggers": {
+        "django": {"handlers": ["console"], "level": "DEBUG"},
+        "django.request": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
+        "django.server": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
+        "daphne": {"handlers": ["console"], "level": "DEBUG"},
+        "channels": {"handlers": ["console"], "level": "DEBUG"},
+        "uvicorn": {"handlers": ["console"], "level": "DEBUG"},
+        "uvicorn.error": {"handlers": ["console"], "level": "DEBUG", "propagate": True},
+        "uvicorn.access": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "asyncio": {"handlers": ["console"], "level": "WARNING"},
+    }
+}

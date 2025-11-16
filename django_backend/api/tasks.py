@@ -11,7 +11,6 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Task, TaskSegment, Resource
-from .services.workflow import WorkflowRunner
 
 
 def _record_resources(task: Task, segment_id: int, paths: List[str], rtype: str):
@@ -56,7 +55,8 @@ def execute_task_segment(self, task_id: int, segment_id: int):
                 task.status = "running"
                 task.save(update_fields=["status"])
 
-        # Execute outside of the open transaction
+        # Execute outside of the open transaction (lazy import heavy deps here)
+        from .services.workflow import WorkflowRunner
         runner = WorkflowRunner()
         story_dir = Path(task.story_dir or task.ensure_story_dir())
 

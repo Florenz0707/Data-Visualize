@@ -1,8 +1,10 @@
-from django.db import models
-from django.contrib.auth.models import User
-from django.conf import settings
-from pathlib import Path
 import shutil
+from pathlib import Path
+
+from django.conf import settings
+from django.contrib.auth.models import User
+from django.db import models
+
 
 class WorkflowDefinition(models.Model):
     version = models.CharField(max_length=32, unique=True)
@@ -23,6 +25,7 @@ class WorkflowDefinition(models.Model):
             {"id": 4, "name": "Speech"},
             {"id": 5, "name": "Video"},
         ]
+
 
 class Task(models.Model):
     STATUS_CHOICES = (
@@ -51,7 +54,7 @@ class Task(models.Model):
             (task_dir / 'image').mkdir(exist_ok=True)
             (task_dir / 'speech').mkdir(exist_ok=True)
             self.story_dir = str(task_dir)
-            self.save(update_fields=["story_dir"])    
+            self.save(update_fields=["story_dir"])
         return Path(self.story_dir)
 
     def purge_files(self):
@@ -59,6 +62,7 @@ class Task(models.Model):
             p = Path(self.story_dir)
             if p.exists():
                 shutil.rmtree(p, ignore_errors=True)
+
 
 class TaskSegment(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="segments")
@@ -70,6 +74,7 @@ class TaskSegment(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
     metadata_json = models.JSONField(default=dict, blank=True)
 
+
 class Resource(models.Model):
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="resources")
     segment_id = models.IntegerField()
@@ -77,4 +82,3 @@ class Resource(models.Model):
     path = models.CharField(max_length=512)
     meta_json = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-

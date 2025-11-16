@@ -3,28 +3,30 @@ from __future__ import annotations
 import json
 from typing import Dict, List
 from pathlib import Path
+from django.conf import settings
 
 # Ensure project root on path and load env
 from .bootstrap import *  # noqa: F401
 from .vendor.base import init_tool_instance
 from .vendor.model_config import get_model_config_instance, load_model_for_agent
-from .vendor.video_compose_agent import split_text_for_speech
 
 
 class WorkflowRunner:
     def __init__(self, project_root: Path | None = None,
                  base_config_path: Path | None = None,
                  models_config_path: Path | None = None):
-        self.project_root = project_root or Path(__file__).resolve().parents[3]
-        # Resolve config paths with fallback: configs/* then config/*
-        def _resolve_cfg(path: Path, alt: Path) -> Path:
-            return path if path.exists() else alt
-        default_main = self.project_root / "configs" / "mm_story_agent.yaml"
-        alt_main = self.project_root / "config" / "mm_story_agent.yaml"
-        default_models = self.project_root / "configs" / "models.yaml"
-        alt_models = self.project_root / "config" / "models.yaml"
-        self.base_config_path = Path(base_config_path) if base_config_path else _resolve_cfg(default_main, alt_main)
-        self.models_config_path = Path(models_config_path) if models_config_path else _resolve_cfg(default_models, alt_models)
+        # Prefer Django project base (django_backend) as root for config directory
+        # This matches path like <...>/django_backend/config/models.yaml
+        from django.conf import settings as dj_settings
+        self.project_root = project_root or Path(dj_settings.BASE_DIR)
+
+        cfg_dir = self.project_root / "config"
+        self.base_config_path = Path(base_config_path) if base_config_path else (cfg_dir / "mm_story_agent.yaml")
+        self.models_config_path = Path(models_config_path) if models_config_path else (cfg_dir / "models.yaml")
+        if not self.base_config_path.exists():
+            raise FileNotFoundError(f"Main config file not found: {self.base_config_path}")
+        if not self.models_config_path.exists():
+            raise FileNotFoundError(f"Model config file not found: {self.models_config_path}")
         self.model_config = get_model_config_instance(str(self.models_config_path))
         # Load base config once
         import yaml
@@ -96,6 +98,9 @@ class WorkflowRunner:
 
     # ========== Segment 3: Split ==========
     def run_split(self, story_dir: str | Path, pages: List[str] | None = None, max_words: int = 20) -> List[List[str]]:
+        # Lazy import to avoid importing cv2-dependent modules at startup
+        from .vendor.video_compose_agent import split_text_for_speech
+
         story_dir = self._story_dir(story_dir)
         script = self._load_script(Path(story_dir))
         if pages is None:

@@ -240,4 +240,3 @@ class StoryDiffusionAgent:
                     break
             image_prompts.append(image_prompt)
         return image_prompts
-

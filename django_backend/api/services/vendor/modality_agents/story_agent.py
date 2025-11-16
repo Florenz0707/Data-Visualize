@@ -149,4 +149,3 @@ class QAOutlineStoryWriter:
         outline = self.generate_outline(params)
         pages = self.generate_story_from_outline(outline)
         return pages
-

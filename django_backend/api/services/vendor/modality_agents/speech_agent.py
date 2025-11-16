@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import warnings
@@ -26,6 +25,7 @@ class CosyVoiceSynthesizer:
     This project no longer bundles the NLS SDK. Please switch speech provider to 'local' (kokoro)
     or 'transformers' in configs/mm_story_agent.yaml -> speech_generation.model.
     """
+
     def __init__(self, *args, **kwargs) -> None:
         pass
 
@@ -138,7 +138,8 @@ class TransformersSynthesizer:
             from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech, SpeechT5HifiGan
             self.processor = SpeechT5Processor.from_pretrained(self.model_id)
             self.model = SpeechT5ForTextToSpeech.from_pretrained(self.model_id).to(self.device)
-            self.vocoder = SpeechT5HifiGan.from_pretrained(cfg.get('vocoder_id', 'microsoft/speecht5_hifigan')).to(self.device)
+            self.vocoder = SpeechT5HifiGan.from_pretrained(cfg.get('vocoder_id', 'microsoft/speecht5_hifigan')).to(
+                self.device)
             self.speaker_embeddings = torch.zeros((1, 512)).to(self.device)
         else:
             from transformers import AutoProcessor, AutoModel
@@ -270,7 +271,8 @@ class SpeechAgent:
         if synthesizer_class:
             generation_agent = synthesizer_class(self.cfg)
         else:
-            raise ValueError(f"Unsupported speech model or provider: '{self.model_name}'. Try 'kokoro' or 'transformers'.")
+            raise ValueError(
+                f"Unsupported speech model or provider: '{self.model_name}'. Try 'kokoro' or 'transformers'.")
 
         segmented_pages = params.get("segmented_pages", None)
         if segmented_pages is None:
@@ -292,4 +294,3 @@ class SpeechAgent:
                 )
                 audio_file_counter += 1
         return {"modality": "speech", "segmented_pages": segmented_pages}
-

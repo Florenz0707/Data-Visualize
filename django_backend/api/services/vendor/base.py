@@ -53,4 +53,3 @@ def register_tool(name):
 
 def init_tool_instance(cfg):
     return TOOL_REGISTRY[cfg["tool"]](cfg["cfg"])
-

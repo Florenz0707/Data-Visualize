@@ -75,4 +75,3 @@ class QwenAgent(object):
                 self.history = []
 
         return response, success
-

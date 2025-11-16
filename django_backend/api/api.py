@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import List
 
 from django.conf import settings
@@ -18,8 +17,8 @@ from .schemas import (
     WorkflowItem, TaskNewIn, TaskNewOut, TaskProgressOut,
     TaskListOut, ResourceOut, ExecuteOut,
 )
-# Import Celery async task
-from .tasks import execute_task_segment
+
+# (Lazy import of Celery task inside view to avoid heavy deps during Django startup/migrate)
 
 api = NinjaAPI(title="MM-StoryAgent Backend")
 
@@ -51,7 +50,7 @@ def login(request: HttpRequest, payload: LoginIn):
         httponly=True,
         samesite="Lax",
         secure=getattr(settings, "REFRESH_COOKIE_SECURE", False),
-        max_age=getattr(settings, "REFRESH_TOKEN_LIFETIME", 7*24*3600),
+        max_age=getattr(settings, "REFRESH_TOKEN_LIFETIME", 7 * 24 * 3600),
     )
     return response
 
@@ -164,6 +163,8 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
         if task.status in ("pending", "failed"):
             task.status = "running"
             task.save(update_fields=["status"])
+        # Lazy import here to avoid importing heavy deps during Django startup/migrate
+        from .tasks import execute_task_segment
         async_res = execute_task_segment.delay(task.id, segmentId)
         async_id = async_res.id
 

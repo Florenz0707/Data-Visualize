@@ -51,7 +51,7 @@ You are an expert in children story writing. You are discussing creative ideas w
 """.strip()
 
 dlg_based_writer_system = """
-Based on a dialogue, write an outline for a children storybook. This dialogue provides some points and ideas for writing the outline. 
+Based on a dialogue, write an outline for a children storybook. This dialogue provides some points and ideas for writing the outline.
 When writing the outline, basic requirements should be met:
 {instruction}
 
@@ -184,4 +184,3 @@ The input consists of all story content, the current story content, and the corr
 ## Output Format
 Directly output improvement suggestions without any additional content if requirements are not met. Otherwise, output "Check passed."
 """.strip()
-
