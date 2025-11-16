@@ -76,3 +76,13 @@ REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_SECURE = False
 REFRESH_COOKIE_HTTPONLY = True
 
+# --- Load .env for model/API keys on server startup ---
+try:
+    from mm_story_agent.config import load_env
+    # Prefer standard path "configs/.env"; also try "config/.env" for user convenience
+    repo_root = BASE_DIR.parent
+    load_env(repo_root / "configs/.env")
+    load_env(repo_root / "config/.env")
+except Exception:
+    # Silently ignore if mm_story_agent is not available yet
+    pass

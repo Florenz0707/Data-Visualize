@@ -3,7 +3,7 @@ from ninja.errors import HttpError
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
 from django.http import HttpRequest, HttpResponse
-from django.utils import timezone
+
 from django.conf import settings
 from .schemas import (
     RegisterIn, RegisterOut, LoginIn, LoginOut,
@@ -16,9 +16,12 @@ from .auth import (
 )
 from .models import Task, TaskSegment, Resource, WorkflowDefinition
 from pathlib import Path
-import json
+from typing import List
 
-api = NinjaAPI(title="MM-StoryAgent Backend Minimal Prototype")
+# Import real workflow runner (ensure api/services is a package)
+from .services.workflow import WorkflowRunner
+
+api = NinjaAPI(title="MM-StoryAgent Backend")
 
 
 @api.post("/register", response={200: RegisterOut})
@@ -38,8 +41,10 @@ def login(request: HttpRequest, payload: LoginIn, response: HttpResponse):
     access = create_access_token(user)
     refresh = create_refresh_token(user)
 
-    # Properly set refresh token cookie on the response
-    response.set_cookie(
+    # Build response and set cookie (no extra response param needed)
+    data = LoginOut(access_token=access).dict()
+    resp = api.create_response(request, data, status=200)
+    resp.set_cookie(
         settings.REFRESH_COOKIE_NAME,
         refresh,
         path="/",
@@ -48,7 +53,7 @@ def login(request: HttpRequest, payload: LoginIn, response: HttpResponse):
         secure=getattr(settings, "REFRESH_COOKIE_SECURE", False),
         max_age=getattr(settings, "REFRESH_TOKEN_LIFETIME", 7*24*3600),
     )
-    return LoginOut(access_token=access)
+    return resp
 
 
 @api.post("/refresh", response={200: LoginOut})
@@ -124,6 +129,11 @@ def task_resource(request: HttpRequest, task_id: int, segmentId: int):
     return ResourceOut(resources=items)
 
 
+def _record_resources(task: Task, segment_id: int, paths: List[str], rtype: str):
+    for p in paths:
+        Resource.objects.create(task=task, segment_id=segment_id, type=rtype, path=str(p))
+
+
 @api.post("/task/{task_id}/execute/{segmentId}", response={200: ExecuteOut})
 def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
     user = require_user(request)
@@ -134,28 +144,52 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
     if segmentId != task.current_segment + 1:
         raise HttpError(400, "Segment cannot be executed out of order")
 
-    # Minimal prototype: we don't run real jobs yet, just simulate completion
-    seg = task.segments.filter(segment_id=segmentId).first()
-    if not seg:
-        raise HttpError(400, "Unknown segment")
+    # Synchronous, single-user execution using real workflow
+    runner = WorkflowRunner()
+    task.ensure_story_dir()
 
-    seg.status = "completed"
-    seg.save(update_fields=["status"])
+    try:
+        if segmentId == 1:
+            pages = runner.run_story(task.story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene)
+            script_path = str(Path(task.story_dir) / "script_data.json")
+            _record_resources(task, 1, [script_path], rtype="json")
+        elif segmentId == 2:
+            images = runner.run_image(task.story_dir)
+            _record_resources(task, 2, images, rtype="image")
+        elif segmentId == 3:
+            runner.run_split(task.story_dir)
+            script_path = str(Path(task.story_dir) / "script_data.json")
+            _record_resources(task, 3, [script_path], rtype="json")
+        elif segmentId == 4:
+            wavs = runner.run_speech(task.story_dir)
+            _record_resources(task, 4, wavs, rtype="audio")
+        elif segmentId == 5:
+            video = runner.run_video(task.story_dir)
+            _record_resources(task, 5, [video], rtype="video")
+        else:
+            raise HttpError(400, "Unknown segment")
+    except HttpError:
+        raise
+    except Exception as e:
+        seg = task.segments.filter(segment_id=segmentId).first()
+        if seg:
+            seg.status = "failed"
+            seg.error_message = str(e)
+            seg.save(update_fields=["status", "error_message"])
+        task.status = "failed"
+        task.save(update_fields=["status"])
+        raise HttpError(500, f"Segment execution failed: {e}")
+
+    seg = task.segments.filter(segment_id=segmentId).first()
+    if seg:
+        seg.status = "completed"
+        seg.save(update_fields=["status"])
 
     task.current_segment = segmentId
-    if segmentId >= 5:
-        task.status = "completed"
-    else:
-        task.status = "running"
+    task.status = "completed" if segmentId >= 5 else "running"
     task.save(update_fields=["current_segment", "status"])
 
-    # Optionally mock resource
-    task.ensure_story_dir()
-    stub_path = Path(task.story_dir) / f"segment_{segmentId}.txt"
-    stub_path.write_text(f"Segment {segmentId} completed at {timezone.now().isoformat()}", encoding="utf-8")
-    Resource.objects.create(task=task, segment_id=segmentId, type="text", path=str(stub_path))
-
-    return ExecuteOut(accepted=True, message="Simulated execution completed")
+    return ExecuteOut(accepted=True, message="Execution completed")
 
 
 @api.delete("/task/{task_id}")
