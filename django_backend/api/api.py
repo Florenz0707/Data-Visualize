@@ -18,8 +18,8 @@ from .schemas import (
     WorkflowItem, TaskNewIn, TaskNewOut, TaskProgressOut,
     TaskListOut, ResourceOut, ExecuteOut,
 )
-# Import real workflow runner (ensure api/services is a package)
-from .services.workflow import WorkflowRunner
+# Import Celery async task
+from .tasks import execute_task_segment
 
 api = NinjaAPI(title="MM-StoryAgent Backend")
 
@@ -136,6 +136,8 @@ def _record_resources(task: Task, segment_id: int, paths: List[str], rtype: str)
 
 @api.post("/task/{task_id}/execute/{segmentId}", response={200: ExecuteOut})
 def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
+    from django.utils import timezone
+
     user = require_user(request)
     task = Task.objects.filter(id=task_id, user=user).first()
     if not task:
@@ -144,52 +146,30 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
     if segmentId != task.current_segment + 1:
         raise HttpError(400, "Segment cannot be executed out of order")
 
-    # Synchronous, single-user execution using real workflow
-    runner = WorkflowRunner()
+    # mark segment running and enqueue async job
     task.ensure_story_dir()
-
-    try:
-        if segmentId == 1:
-            runner.run_story(task.story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene)
-            script_path = str(Path(task.story_dir) / "script_data.json")
-            _record_resources(task, 1, [script_path], rtype="json")
-        elif segmentId == 2:
-            images = runner.run_image(task.story_dir)
-            _record_resources(task, 2, images, rtype="image")
-        elif segmentId == 3:
-            runner.run_split(task.story_dir)
-            script_path = str(Path(task.story_dir) / "script_data.json")
-            _record_resources(task, 3, [script_path], rtype="json")
-        elif segmentId == 4:
-            wavs = runner.run_speech(task.story_dir)
-            _record_resources(task, 4, wavs, rtype="audio")
-        elif segmentId == 5:
-            video = runner.run_video(task.story_dir)
-            _record_resources(task, 5, [video], rtype="video")
-        else:
-            raise HttpError(400, "Unknown segment")
-    except HttpError:
-        raise
-    except Exception as e:
-        seg = task.segments.filter(segment_id=segmentId).first()
-        if seg:
-            seg.status = "failed"
-            seg.error_message = str(e)
-            seg.save(update_fields=["status", "error_message"])
-        task.status = "failed"
-        task.save(update_fields=["status"])
-        raise HttpError(500, f"Segment execution failed: {e}")
-
     seg = task.segments.filter(segment_id=segmentId).first()
-    if seg:
-        seg.status = "completed"
-        seg.save(update_fields=["status"])
+    if not seg:
+        raise HttpError(400, "Unknown segment")
 
-    task.current_segment = segmentId
-    task.status = "completed" if segmentId >= 5 else "running"
-    task.save(update_fields=["current_segment", "status"])
+    if seg.status == "running":
+        # already queued/running, idempotent response
+        async_id = None
+    else:
+        seg.status = "running"
+        if not seg.started_at:
+            seg.started_at = timezone.now()
+        seg.error_message = ""
+        seg.save(update_fields=["status", "started_at", "error_message"])
+        if task.status in ("pending", "failed"):
+            task.status = "running"
+            task.save(update_fields=["status"])
+        async_res = execute_task_segment.delay(task.id, segmentId)
+        async_id = async_res.id
 
-    return ExecuteOut(accepted=True, message="Execution completed")
+    data = ExecuteOut(accepted=True, celery_task_id=async_id, message="Execution queued")
+    # Return 202 Accepted
+    return api.create_response(request, data.model_dump(), status=202)
 
 
 @api.delete("/task/{task_id}")
@@ -201,4 +181,3 @@ def delete_task(request: HttpRequest, task_id: int):
     task.purge_files()
     task.delete()
     return {"deleted": True}
-

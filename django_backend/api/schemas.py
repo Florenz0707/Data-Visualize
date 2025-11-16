@@ -41,5 +41,5 @@ class ResourceOut(BaseModel):
 
 class ExecuteOut(BaseModel):
     accepted: bool
+    celery_task_id: Optional[str] = None
     message: str = ""
-
