@@ -1,14 +1,15 @@
-from typing import List, Optional
-from pathlib import Path
-import os
 import mimetypes
-import zipfile
+import os
 import tempfile
+import zipfile
+from pathlib import Path
+from typing import List, Optional, AsyncIterator
 
+import aiofiles
 from django.conf import settings
 from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
-from django.http import HttpRequest, FileResponse
+from django.http import HttpRequest, StreamingHttpResponse
 from ninja import NinjaAPI
 from ninja.errors import HttpError
 
@@ -20,7 +21,7 @@ from .models import Task, TaskSegment, Resource, WorkflowDefinition
 from .schemas import (
     RegisterIn, RegisterOut, LoginIn, LoginOut,
     WorkflowItem, TaskNewIn, TaskNewOut, TaskProgressOut,
-    TaskListOut, ResourceOut, ExecuteOut,
+    TaskListOut, ExecuteOut,
 )
 
 # (Lazy import of Celery task inside view to avoid heavy deps during Django startup/migrate)
@@ -137,6 +138,20 @@ def task_resource(request: HttpRequest, task_id: int, segmentId: int, name: Opti
     if not resources:
         raise HttpError(404, "No resources for this segment")
 
+    async def _iter_file_async(path: Path, chunk_size: int = 8192):
+        async with aiofiles.open(path, "rb") as f:
+            while True:
+                chunk = await f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    def _build_async_file_response(fpath: Path, filename: Optional[str] = None, content_type: Optional[str] = None):
+        resp = StreamingHttpResponse(_iter_file_async(fpath), content_type=content_type or "application/octet-stream")
+        display_name = filename or fpath.name
+        resp["Content-Disposition"] = f'attachment; filename="{display_name}"'
+        return resp
+
     def _safe_path(p: str) -> Path:
         q = Path(p).resolve()
         # Ensure resource is under this task's story_dir
@@ -156,17 +171,13 @@ def task_resource(request: HttpRequest, task_id: int, segmentId: int, name: Opti
             raise HttpError(404, "Requested file not found in resources")
         fpath = _safe_path(cand[0])
         mime, _ = mimetypes.guess_type(str(fpath))
-        resp = FileResponse(open(fpath, "rb"), content_type=mime or "application/octet-stream")
-        resp["Content-Disposition"] = f"attachment; filename=\"{fpath.name}\""
-        return resp
+        return _build_async_file_response(fpath, content_type=mime or "application/octet-stream")
 
     # No specific name: if only one file, return it; else zip them
     if len(resources) == 1:
         fpath = _safe_path(resources[0])
         mime, _ = mimetypes.guess_type(str(fpath))
-        resp = FileResponse(open(fpath, "rb"), content_type=mime or "application/octet-stream")
-        resp["Content-Disposition"] = f"attachment; filename=\"{fpath.name}\""
-        return resp
+        return _build_async_file_response(fpath, content_type=mime or "application/octet-stream")
 
     # Multiple files: stream a zip
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"-task{task_id}-seg{segmentId}.zip")
@@ -182,10 +193,7 @@ def task_resource(request: HttpRequest, task_id: int, segmentId: int, name: Opti
                 except ValueError:
                     arcname = fpath.name
                 zf.write(fpath, arcname=str(arcname))
-        resp = FileResponse(open(tmp_path, "rb"), content_type="application/zip")
-        resp["Content-Disposition"] = f"attachment; filename=\"task{task_id}-segment{segmentId}.zip\""
-        # Note: tmp file will be cleaned up by OS on reboot; for strict cleanup, consider background deletion
-        return resp
+        return _build_async_file_response(tmp_path, filename=f"task{task_id}-segment{segmentId}.zip", content_type="application/zip")
     except Exception as e:
         # Best-effort cleanup on error
         try:

@@ -59,10 +59,19 @@ def split_keep_separator(text, separator):
     return pieces
 
 
-def split_text_for_speech(text, max_words=20):
+def split_text_for_speech(text, max_chars: int = 60):
+    """
+    Split text into segments by character length.
+    Strategy:
+    1) Respect sentence boundaries first (., !, ?) while protecting common abbreviations.
+    2) If a sentence still exceeds max_chars, try split by ; : , keeping separators.
+    3) Still too long: perform hard character-chunking (<= max_chars), prefer to break on spaces.
+    """
     import re
+
     if not text or not text.strip():
         return []
+
     common_abbreviations = [
         'Dr', 'Mr', 'Mrs', 'Ms', 'Prof', 'Sr', 'Jr', 'Ltd', 'Inc', 'Corp', 'Co',
         'St', 'Ave', 'Blvd', 'Rd', 'etc', 'vs', 'e.g', 'i.e', 'a.m', 'p.m',
@@ -80,6 +89,8 @@ def split_text_for_speech(text, max_words=20):
         'Min', 'Max', 'Avg', 'Std', 'Var', 'Dev',
         'Est', 'Aprox', 'Circa', 'ca'
     ]
+
+    # Protect abbreviations like "Dr." to avoid sentence split on the period
     protected_text = text
     abbreviation_markers = {}
     for i, abbr in enumerate(common_abbreviations):
@@ -88,6 +99,8 @@ def split_text_for_speech(text, max_words=20):
             marker = f"__ABBR_{i}__"
             abbreviation_markers[marker] = abbr + '.'
             protected_text = re.sub(pattern, marker, protected_text)
+
+    # Split into sentences (keep punctuation)
     sentences = re.split(r'([.!?]+)', protected_text)
     complete_sentences = []
     for i in range(0, len(sentences) - 1, 2):
@@ -99,102 +112,55 @@ def split_text_for_speech(text, max_words=20):
         complete_sentences.append(sentences[-1].strip())
     if not complete_sentences:
         complete_sentences = [protected_text.strip()]
+
+    # Restore abbreviations
     for i, sentence in enumerate(complete_sentences):
         for marker, original in abbreviation_markers.items():
             sentence = sentence.replace(marker, original)
         complete_sentences[i] = sentence
-    all_sentences_short = all(len(sentence.split()) <= max_words for sentence in complete_sentences)
-    if all_sentences_short:
-        return complete_sentences
-    result_segments = []
-    for sentence in complete_sentences:
-        if not sentence:
+
+    def chunk_by_chars(s: str, limit: int) -> list[str]:
+        # Prefer breaking on spaces, but ensure progress even if a single token is too long
+        out = []
+        cur = s.strip()
+        while cur:
+            if len(cur) <= limit:
+                out.append(cur)
+                break
+            # find last space within limit
+            cut = cur.rfind(' ', 0, limit + 1)
+            if cut == -1:
+                # no space; hard cut
+                out.append(cur[:limit])
+                cur = cur[limit:].lstrip()
+            else:
+                out.append(cur[:cut])
+                cur = cur[cut + 1:].lstrip()
+        return out
+
+    results = []
+    for sent in complete_sentences:
+        if len(sent) <= max_chars:
+            results.append(sent)
             continue
-        words = sentence.split()
-        if len(words) <= max_words:
-            result_segments.append(sentence)
-        else:
-            protected_sentence = sentence
-            sentence_abbreviation_markers = {}
-            for i, abbr in enumerate(common_abbreviations):
-                pattern = re.escape(abbr) + r'\.'
-                if re.search(pattern, protected_sentence):
-                    marker = f"__SENT_ABBR_{i}__"
-                    sentence_abbreviation_markers[marker] = abbr + '.'
-                    protected_sentence = re.sub(pattern, marker, protected_sentence)
-            sub_sentences = re.split(r'([;:]+)', protected_sentence)
-            complete_sub_sentences = []
-            for i in range(0, len(sub_sentences) - 1, 2):
-                if i + 1 < len(sub_sentences):
-                    sub_sentence = (sub_sentences[i] + sub_sentences[i + 1]).strip()
-                    if sub_sentence:
-                        complete_sub_sentences.append(sub_sentence)
-            if len(sub_sentences) % 2 == 1 and sub_sentences[-1].strip():
-                complete_sub_sentences.append(sub_sentences[-1].strip())
-            if not complete_sub_sentences:
-                complete_sub_sentences = [protected_sentence]
-            for i, sub_sentence in enumerate(complete_sub_sentences):
-                for marker, original in sentence_abbreviation_markers.items():
-                    sub_sentence = sub_sentence.replace(marker, original)
-                complete_sub_sentences[i] = sub_sentence
-            for sub_sentence in complete_sub_sentences:
-                sub_words = sub_sentence.split()
-                if len(sub_words) <= max_words:
-                    result_segments.append(sub_sentence)
-                else:
-                    protected_sub_sentence = sub_sentence
-                    sub_sentence_abbreviation_markers = {}
-                    for i, abbr in enumerate(common_abbreviations):
-                        pattern = re.escape(abbr) + r'\.'
-                        if re.search(pattern, protected_sub_sentence):
-                            marker = f"__SUB_ABBR_{i}__"
-                            sub_sentence_abbreviation_markers[marker] = abbr + '.'
-                            protected_sub_sentence = re.sub(pattern, marker, protected_sub_sentence)
-                    comma_parts = re.split(r'([,]+)', protected_sub_sentence)
-                    complete_comma_parts = []
-                    for i in range(0, len(comma_parts) - 1, 2):
-                        if i + 1 < len(comma_parts):
-                            part = (comma_parts[i] + comma_parts[i + 1]).strip()
-                            if part:
-                                complete_comma_parts.append(part)
-                    if len(comma_parts) % 2 == 1 and comma_parts[-1].strip():
-                        complete_comma_parts.append(comma_parts[-1].strip())
-                    if not complete_comma_parts:
-                        complete_comma_parts = [protected_sub_sentence]
-                    for i, part in enumerate(complete_comma_parts):
-                        for marker, original in sub_sentence_abbreviation_markers.items():
-                            part = part.replace(marker, original)
-                        complete_comma_parts[i] = part
-                    current_segment = ""
-                    for part in complete_comma_parts:
-                        part_words = part.split()
-                        if len(part_words) > max_words:
-                            if current_segment:
-                                result_segments.append(current_segment.strip())
-                                current_segment = ""
-                            current_words = []
-                            for word in part_words:
-                                if len(current_words) < max_words:
-                                    current_words.append(word)
-                                else:
-                                    segment_text = " ".join(current_words)
-                                    if not segment_text.endswith(('.', '!', '?', ';', ':', ',')):
-                                        segment_text += "."
-                                    result_segments.append(segment_text)
-                                    current_words = [word]
-                            current_segment = " ".join(current_words)
-                        else:
-                            test_segment = current_segment + (" " + part if current_segment else part)
-                            test_words = test_segment.split()
-                            if len(test_words) <= max_words:
-                                current_segment = test_segment
-                            else:
-                                if current_segment:
-                                    result_segments.append(current_segment.strip())
-                                current_segment = part
-                    if current_segment:
-                        result_segments.append(current_segment.strip())
-    return result_segments
+        # try split by ; : , while keeping separators with the previous part
+        protected_sent = sent
+        sub_parts = re.split(r'([;:,])', protected_sent)
+        merged = []
+        for i in range(0, len(sub_parts), 2):
+            part = sub_parts[i].strip()
+            sep = sub_parts[i + 1] if i + 1 < len(sub_parts) else ''
+            if part:
+                merged.append((part + sep).strip())
+        if not merged:
+            merged = [sent]
+        for part in merged:
+            if len(part) <= max_chars:
+                results.append(part)
+            else:
+                results.extend(chunk_by_chars(part, max_chars))
+
+    return results
 
 
 @register_tool("slideshow_video_compose")

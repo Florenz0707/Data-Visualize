@@ -21,6 +21,11 @@ story_writer:
         scene: "(no scene specified)"
 
 
+# ==================== 文本切分 ====================
+text_split:
+    params:
+        max_chars: 60
+
 # ==================== 语音合成 ====================
 speech_generation:
     tool: speech_generation

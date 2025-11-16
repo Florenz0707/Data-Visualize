@@ -4,7 +4,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-me")
-DEBUG = True
+DEBUG = False
 ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
@@ -77,6 +77,37 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
+# Celery stability and reliability settings
+CELERY_BROKER_HEARTBEAT = int(os.environ.get("CELERY_BROKER_HEARTBEAT", 60))
+CELERY_BROKER_CONNECTION_TIMEOUT = int(os.environ.get("CELERY_BROKER_CONNECTION_TIMEOUT", 30))
+CELERY_BROKER_POOL_LIMIT = int(os.environ.get("CELERY_BROKER_POOL_LIMIT", 20))
+
+# Ensure tasks are only acknowledged after successful execution
+CELERY_TASK_ACKS_LATE = True
+# Avoid over-prefetching on long CPU-bound tasks
+CELERY_WORKER_PREFETCH_MULTIPLIER = int(os.environ.get("CELERY_WORKER_PREFETCH_MULTIPLIER", 1))
+# If a worker is lost mid-task, requeue it (requires acks_late)
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+
+# Task time limits (seconds)
+CELERY_TASK_SOFT_TIME_LIMIT = int(os.environ.get("CELERY_TASK_SOFT_TIME_LIMIT", 1800))  # 30 min
+CELERY_TASK_TIME_LIMIT = int(os.environ.get("CELERY_TASK_TIME_LIMIT", 2100))  # 35 min
+
+# Transport options for Redis
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "socket_keepalive": True,
+    "socket_timeout": 30,
+    "retry_on_timeout": True,
+    # Ensure messages become visible again if a worker dies holding them
+    "visibility_timeout": 3600,
+}
+
+# Do not hijack Django's root logger
+CELERYD_HIJACK_ROOT_LOGGER = False
+
+# Cancel long running tasks on broker connection loss (Celery 5.1+, default True in 6.0)
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
+
 # django-celery-results
 CELERY_RESULT_EXTENDED = True
 
@@ -141,9 +172,6 @@ LOGGING = {
         "django.server": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
         "daphne": {"handlers": ["console"], "level": "DEBUG"},
         "channels": {"handlers": ["console"], "level": "DEBUG"},
-        "uvicorn": {"handlers": ["console"], "level": "DEBUG"},
-        "uvicorn.error": {"handlers": ["console"], "level": "DEBUG", "propagate": True},
-        "uvicorn.access": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "asyncio": {"handlers": ["console"], "level": "WARNING"},
     }
 }

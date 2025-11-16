@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 from typing import Dict, List
-from pathlib import Path
-from django.conf import settings
 
 # Ensure project root on path and load env
 from .bootstrap import *  # noqa: F401
@@ -107,15 +105,22 @@ class WorkflowRunner:
         return images
 
     # ========== Segment 3: Split ==========
-    def run_split(self, story_dir: str | Path, pages: List[str] | None = None, max_words: int = 20) -> List[List[str]]:
+    def run_split(self, story_dir: str | Path, pages: List[str] | None = None, max_chars: int | None = None) -> List[List[str]]:
         # Lazy import to avoid importing cv2-dependent modules at startup
         from .vendor.video_compose_agent import split_text_for_speech
+
+        # Load default from config if not provided
+        if max_chars is None:
+            try:
+                max_chars = int(self.base_cfg.get("text_split", {}).get("params", {}).get("max_chars", 60))
+            except Exception:
+                max_chars = 60
 
         story_dir = self._story_dir(story_dir)
         script = self._load_script(Path(story_dir))
         if pages is None:
             pages = [p.get("story", "") for p in script.get("pages", [])]
-        segmented = [split_text_for_speech(page, max_words=max_words) for page in pages]
+        segmented = [split_text_for_speech(page, max_chars=max_chars) for page in pages]
         script["segmented_pages"] = segmented
         self._save_script(Path(story_dir), script)
         return segmented
