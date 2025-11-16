@@ -170,3 +170,4 @@ generated_stories
 .vscode
 
 backup/
+.wsl/

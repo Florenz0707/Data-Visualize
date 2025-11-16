@@ -14,6 +14,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "django_celery_results",
     "api",
 ]
@@ -79,6 +80,16 @@ CELERY_TIMEZONE = TIME_ZONE
 # django-celery-results
 CELERY_RESULT_EXTENDED = True
 
+# Channels (WebSocket gateway)
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [os.environ.get("REDIS_URL", REDIS_URL)],
+        },
+    }
+}
+
 # Storage roots for generated assets (reuse project root generated_stories directory)
 # Store generated assets within django_backend directory by default
 GENERATED_ROOT = (BASE_DIR / "generated_stories").resolve()
@@ -92,12 +103,25 @@ REFRESH_COOKIE_SECURE = False
 REFRESH_COOKIE_HTTPONLY = True
 
 # --- Load .env for model/API keys on server startup ---
-try:
-    from mm_story_agent.config import load_env
-    # Prefer standard path "configs/.env"; also try "config/.env" for user convenience
-    repo_root = BASE_DIR.parent
-    load_env(repo_root / "configs/.env")
-    load_env(repo_root / "config/.env")
-except Exception:
-    # Silently ignore if mm_story_agent is not available yet
-    pass
+# Prefer standard path "configs/.env"; also try "config/.env" for user convenience
+# Avoid external dependencies to keep settings self-contained
+
+def _load_env_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                os.environ.setdefault(key, value)
+    except FileNotFoundError:
+        pass
+
+_repo_root = BASE_DIR.parent
+_load_env_file(_repo_root / "configs/.env")
+_load_env_file(_repo_root / "config/.env")
