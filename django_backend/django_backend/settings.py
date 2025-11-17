@@ -132,7 +132,7 @@ GENERATED_ROOT = (BASE_DIR / "generated_stories").resolve()
 GENERATED_ROOT.mkdir(parents=True, exist_ok=True)
 
 # Token lifetimes (seconds)
-ACCESS_TOKEN_LIFETIME = int(os.environ.get("ACCESS_TOKEN_LIFETIME", 15 * 60))  # 15 minutes
+ACCESS_TOKEN_LIFETIME = int(os.environ.get("ACCESS_TOKEN_LIFETIME", 60 * 60))  # 1 hour
 REFRESH_TOKEN_LIFETIME = int(os.environ.get("REFRESH_TOKEN_LIFETIME", 7 * 24 * 3600))  # 7 days
 REFRESH_COOKIE_NAME = "refresh_token"
 REFRESH_COOKIE_SECURE = False

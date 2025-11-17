@@ -3,7 +3,7 @@ import os
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import List, Optional, AsyncIterator
+from typing import List, Optional, AsyncIterator, Tuple
 
 import aiofiles
 from django.conf import settings
@@ -11,6 +11,9 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import User
 from django.http import HttpRequest, StreamingHttpResponse
 from ninja import NinjaAPI
+from django.db import transaction
+import shutil
+import json
 from ninja.errors import HttpError
 
 from .auth import (
@@ -211,8 +214,77 @@ def _record_resources(task: Task, segment_id: int, paths: List[str], rtype: str)
         Resource.objects.create(task=task, segment_id=segment_id, type=rtype, path=str(p))
 
 
+def _prepare_redo(task: Task, start_segment: int) -> None:
+    """Prepare redo starting from start_segment (1..5):
+    - Reset TaskSegment >= start_segment to pending
+    - Delete Resource rows for segments >= start_segment
+    - Remove generated files on disk accordingly
+    - Set task.current_segment = start_segment - 1 and status to running
+    """
+    if start_segment < 1 or start_segment > 5:
+        raise HttpError(400, "Invalid segmentId")
+
+    story_dir = Path(task.ensure_story_dir()).resolve()
+
+    # 1) DB updates: reset segments and remove resources
+    with transaction.atomic():
+        # reset segments >= start_segment
+        segs = task.segments.select_for_update().filter(segment_id__gte=start_segment)
+        segs.update(status="pending", error_message="", started_at=None, ended_at=None)
+        # delete resources >= start_segment
+        Resource.objects.filter(task=task, segment_id__gte=start_segment).delete()
+        # update task pointer
+        task.current_segment = start_segment - 1
+        # Keep task running to reflect that it is ready to re-run
+        task.status = "running"
+        task.save(update_fields=["current_segment", "status"])
+
+    # 2) Filesystem cleanup according to start_segment
+    def _safe_rm(p: Path):
+        try:
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            elif p.exists():
+                p.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    try:
+        if start_segment <= 1:
+            # wipe everything under story_dir
+            for child in story_dir.iterdir():
+                _safe_rm(child if child.is_dir() else child)
+        elif start_segment == 2:
+            _safe_rm(story_dir / "image")
+            _safe_rm(story_dir / "speech")
+            _safe_rm(story_dir / "output.mp4")
+        elif start_segment == 3:
+            # remove speech and final video
+            _safe_rm(story_dir / "speech")
+            _safe_rm(story_dir / "output.mp4")
+            # remove segmented info from script_data.json (if exists)
+            script = story_dir / "script_data.json"
+            if script.exists():
+                try:
+                    data = json.loads(script.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and "segmented_pages" in data:
+                        data.pop("segmented_pages", None)
+                        script.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+                except Exception:
+                    pass
+        elif start_segment == 4:
+            _safe_rm(story_dir / "speech")
+            _safe_rm(story_dir / "output.mp4")
+        elif start_segment == 5:
+            _safe_rm(story_dir / "output.mp4")
+    finally:
+        # ensure directories exist for future steps
+        (story_dir / "image").mkdir(parents=True, exist_ok=True)
+        (story_dir / "speech").mkdir(parents=True, exist_ok=True)
+
+
 @api.post("/task/{task_id}/execute/{segmentId}", response={200: ExecuteOut})
-def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
+def execute_segment(request: HttpRequest, task_id: int, segmentId: int, redo: bool = False):
     from django.utils import timezone
 
     user = require_user(request)
@@ -220,6 +292,17 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int):
     if not task:
         raise HttpError(404, "Task not found")
 
+    # If redo requested from an already completed segment, prepare rollback first
+    if redo and segmentId <= task.current_segment:
+        # reject if any segment is running
+        running_exists = task.segments.filter(status="running").exists()
+        if running_exists:
+            raise HttpError(409, "Task is running, retry later")
+        _prepare_redo(task, segmentId)
+        # reload task after DB updates
+        task.refresh_from_db()
+
+    # Normal forward-only constraint after possible redo
     if segmentId != task.current_segment + 1:
         raise HttpError(400, "Segment cannot be executed out of order")
 
