@@ -152,9 +152,12 @@ def task_resource(request: HttpRequest, task_id: int, segmentId: int, name: Opti
         resp["Content-Disposition"] = f'attachment; filename="{display_name}"'
         return resp
 
+    base_dir = Path(settings.BASE_DIR).resolve()
+
     def _safe_path(p: str) -> Path:
-        q = Path(p).resolve()
-        # Ensure resource is under this task's story_dir
+        # p is a relative path from DB; join with project root to get absolute path
+        q = (base_dir / p).resolve()
+        # Ensure resource is under this task's story_dir (which is also absolute)
         try:
             if not q.is_file() or not q.is_relative_to(story_dir):
                 raise ValueError

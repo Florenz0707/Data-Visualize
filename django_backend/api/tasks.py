@@ -13,9 +13,26 @@ from django.utils import timezone
 from .models import Task, TaskSegment, Resource
 
 
+def _relativize_path(p: str | Path) -> str:
+    from pathlib import Path as _P
+    base = Path(getattr(settings, "BASE_DIR", ".")).resolve()
+    pp = _P(p).resolve()
+    try:
+        rel = pp.relative_to(base)
+        return str(rel).replace("\\", "/")
+    except Exception:
+        # Fallback: best-effort relpath
+        try:
+            import os as _os
+            return _os.path.relpath(str(pp), str(base)).replace("\\", "/")
+        except Exception:
+            return str(pp)
+
+
 def _record_resources(task: Task, segment_id: int, paths: List[str], rtype: str):
     for p in paths:
-        Resource.objects.create(task=task, segment_id=segment_id, type=rtype, path=str(p))
+        rel = _relativize_path(p)
+        Resource.objects.create(task=task, segment_id=segment_id, type=rtype, path=rel)
 
 
 def _publish_notify(user_id: int, payload: dict):
@@ -105,7 +122,10 @@ def execute_task_segment(self, task_id: int, segment_id: int):
                 task.story_dir = str(story_dir)
             task.save(update_fields=["current_segment", "status", "story_dir"])
 
-        # Notify success
+        # Notify success (send relative paths)
+        rel_resources = [
+            _relativize_path(p) for p in (created_resources or [])
+        ]
         _publish_notify(
             user_id=task.user_id,
             payload={
@@ -113,7 +133,7 @@ def execute_task_segment(self, task_id: int, segment_id: int):
                 "task_id": task.id,
                 "segment_id": segment_id,
                 "status": "completed",
-                "resources": created_resources,
+                "resources": rel_resources,
             },
         )
 
