@@ -4,7 +4,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-me")
-DEBUG = False
+DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
@@ -166,17 +166,28 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
+        # More details for debugging: file, line and function name
+        "verbose": {"format": "[%(asctime)s] %(levelname)s %(name)s %(pathname)s:%(lineno)d %(funcName)s: %(message)s"},
         "standard": {"format": "[%(asctime)s] %(levelname)s %(name)s: %(message)s"},
     },
     "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+        "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
     },
     "loggers": {
+        # Django core
         "django": {"handlers": ["console"], "level": "DEBUG"},
         "django.request": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
         "django.server": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
+        # ASGI servers / Channels
         "daphne": {"handlers": ["console"], "level": "DEBUG"},
         "channels": {"handlers": ["console"], "level": "DEBUG"},
+        # Celery and dependencies
+        "celery": {"handlers": ["console"], "level": "DEBUG", "propagate": True},
+        "celery.app.trace": {"handlers": ["console"], "level": "DEBUG", "propagate": True},
+        "kombu": {"handlers": ["console"], "level": "INFO", "propagate": True},
+        # Third-party libs used in video/audio
+        "moviepy": {"handlers": ["console"], "level": "INFO", "propagate": True},
+        # Keep asyncio noise moderate
         "asyncio": {"handlers": ["console"], "level": "WARNING"},
     }
 }

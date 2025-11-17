@@ -14,7 +14,7 @@ dependencies = [
     "hf-xet>=1.1.10",
     "kokoro>=0.9.4",
     "librosa>=0.11.0",
-    "moviepy>=2.2.0",
+    "moviepy==2.2.0",
     "numpy>=2.2.6",
     "openai>=2.5.0",
     "pillow>=11.3.0",
@@ -39,6 +39,10 @@ dependencies = [
 torch = [
    { index = "pytorch-cu128" }
 ]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

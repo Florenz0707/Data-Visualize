@@ -739,7 +739,7 @@ requires-dist = [
     { name = "hf-xet", specifier = ">=1.1.10" },
     { name = "kokoro", specifier = ">=0.9.4" },
     { name = "librosa", specifier = ">=0.11.0" },
-    { name = "moviepy", specifier = ">=2.2.0" },
+    { name = "moviepy", specifier = "==2.2.0" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "openai", specifier = ">=2.5.0" },
     { name = "opencv-python-headless", specifier = ">=4.12.0.88" },

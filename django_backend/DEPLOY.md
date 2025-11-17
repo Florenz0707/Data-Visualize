@@ -159,6 +159,39 @@ server {
 
 ---
 
+## FFmpeg 配置要求与验证
+
+本项目的视频合成（第5环节）依赖 ffmpeg。请确保服务器上已正确安装并且可被运行用户访问。
+
+- 安装（Ubuntu/Debian）：
+  - sudo apt update && sudo apt install -y ffmpeg
+- 安装（CentOS/RHEL）：
+  - sudo dnf install -y epel-release && sudo dnf install -y ffmpeg
+- 安装（Windows 开发）：
+  - 从 https://www.gyan.dev/ffmpeg/builds/ 下载 “release full” 压缩包；解压后将 bin 目录加入系统 PATH（如 C:\ffmpeg\bin）。
+  - 重新打开终端，确保 `ffmpeg -version` 可用。
+
+- 验证：
+  - 运行 `ffmpeg -version`，应能输出版本信息。
+  - MoviePy 写文件时会调用 ffmpeg；若 PATH 未包含 ffmpeg，可为 MoviePy 设置环境变量 IMAGEIO_FFMPEG_EXE 指向 ffmpeg 可执行文件：
+    - Linux/WSL：export IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg
+    - Windows PowerShell：$env:IMAGEIO_FFMPEG_EXE = "C:\\ffmpeg\\bin\\ffmpeg.exe"
+
+- 编解码器建议：
+  - 视频：libx264（默认）；音频：aac。打包时 MoviePy 会使用这些编码器。
+  - 若系统 ffmpeg 构建缺少 aac，请安装具备 aac 的发行版或改用 libmp3lame（同时修改代码/配置）。
+
+- 性能与稳定性：
+  - 建议在服务器上使用较新版本 ffmpeg（>=4.2）。
+  - 可在配置中调节写出线程数（threads）与 fps、分辨率（size）以平衡质量与性能。
+
+- 常见问题：
+  - FileNotFoundError: ffmpeg：未安装或 PATH 未配置，参照上方安装与环境变量。
+  - BrokenPipeError/编码失败：检查磁盘空间、权限、以及 ffmpeg 是否支持所需编码器。
+  - Windows 路径含空格：确保 IMAGEIO_FFMPEG_EXE 用引号包裹完整路径。
+
+---
+
 ## 三、Windows + WSL 开发/准生产（原文）
 
 本节为原有指南（保留）。若在 Windows 运行 Django/Celery、在 WSL 中运行 Redis，请参考：
