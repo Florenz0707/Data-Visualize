@@ -1,18 +1,13 @@
 import platform
 import re
 import signal
-from contextlib import contextmanager
 import subprocess
 import tempfile
-import os
+from contextlib import contextmanager
 from pathlib import Path
 
-from moviepy import vfx
-
-slide_in = vfx.SlideIn
-slide_out = vfx.SlideOut
-
 import logging
+
 logger = logging.getLogger(__name__)
 from .base import register_tool
 
@@ -173,7 +168,8 @@ class SlideshowVideoComposeAgent:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
 
-    def adjust_caption_config(self, width, height, existing: dict | None = None):
+    @classmethod
+    def adjust_caption_config(cls, width, height, existing: dict | None = None):
         existing = dict(existing or {})
         area_height_default = int(height * 0.06)
         fontsize_default = int((width + height) / 2 * 0.025)
@@ -183,7 +179,8 @@ class SlideshowVideoComposeAgent:
             existing["fontsize"] = fontsize_default
         return existing
 
-    def _gather_assets(self, story_dir: Path):
+    @classmethod
+    def _gather_assets(cls, story_dir: Path):
         img_dir = (story_dir / "image")
         images = []
         # Gather common image extensions and naming patterns
@@ -208,8 +205,6 @@ class SlideshowVideoComposeAgent:
         Output: story_dir/output.mp4
         """
 
-        from moviepy import (ImageClip, AudioFileClip, ColorClip, CompositeVideoClip,
-                             concatenate_videoclips, concatenate_audioclips)
         import json
 
         story_dir = Path(params.get("story_dir", ".")).resolve()
@@ -253,7 +248,8 @@ class SlideshowVideoComposeAgent:
                 except Exception:
                     seg_pages = None
         if not isinstance(seg_pages, list) or len(seg_pages) != len(images):
-            raise RuntimeError("segmented_pages missing or length mismatch with images. Cannot map audio segments per page.")
+            raise RuntimeError(
+                "segmented_pages missing or length mismatch with images. Cannot map audio segments per page.")
         seg_counts = [len(page) for page in seg_pages]
         if sum(seg_counts) != len(audios):
             raise RuntimeError(f"Audio/page mismatch: required={sum(seg_counts)}, provided={len(audios)}.")
@@ -285,24 +281,27 @@ class SlideshowVideoComposeAgent:
             page_videos = []
             for idx, img_path in enumerate(images):
                 k = seg_counts[idx]
-                aud_list_path = Path(temp_dir) / f"aud_list_{idx+1}.txt"
+                aud_list_path = Path(temp_dir) / f"aud_list_{idx + 1}.txt"
                 with open(aud_list_path, "w", encoding="utf-8") as f:
                     for j in range(k):
                         apath = audios[audio_cursor + j]
                         f.write(f"file '{Path(apath).as_posix()}'\n")
                 audio_cursor += k
-                merged_wav = Path(temp_dir) / f"merged_audio_{idx+1}.wav"
-                run_ffmpeg([ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(aud_list_path), "-c:a", "pcm_s16le", str(merged_wav)],
-                           f"concat_audio_page{idx+1}")
+                merged_wav = Path(temp_dir) / f"merged_audio_{idx + 1}.wav"
+                run_ffmpeg(
+                    [ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(aud_list_path), "-c:a", "pcm_s16le",
+                     str(merged_wav)],
+                    f"concat_audio_page{idx + 1}")
 
-                page_mp4 = Path(temp_dir) / f"page_{idx+1}.mp4"
+                page_mp4 = Path(temp_dir) / f"page_{idx + 1}.mp4"
                 run_ffmpeg([ffmpeg_bin, "-y",
                             "-loop", "1", "-i", str(img_path),
                             "-i", str(merged_wav),
-                            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
+                            "-vf",
+                            f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
                             "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-r", str(fps),
                             "-c:a", "aac", "-shortest", str(page_mp4)],
-                           f"make_page_video_{idx+1}")
+                           f"make_page_video_{idx + 1}")
                 page_videos.append(page_mp4)
 
             # Concat all pages
@@ -310,253 +309,14 @@ class SlideshowVideoComposeAgent:
             with open(concat_list, "w", encoding="utf-8") as f:
                 for p in page_videos:
                     f.write(f"file '{p.as_posix()}'\n")
-            run_ffmpeg([ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(output)],
-                       "concat_pages")
+            run_ffmpeg(
+                [ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(output)],
+                "concat_pages")
 
             logger.info("[VideoCompose] ffmpeg pipeline completed -> %s", output)
             return str(output)
         finally:
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
-        # FFmpeg-only pipeline end
-
-        def set_duration_compat(clip, dur: float):
-            try:
-                return clip.set_duration(dur)
-            except Exception:
-                return clip.with_duration(dur)
-
-        def set_audio_compat(clip, audio):
-            try:
-                return clip.set_audio(audio)
-            except Exception:
-                return clip.with_audio(audio)
-
-        def resize_width_compat(img_clip, target_w: int):
-            # Prefer vfx.resize if available
-            return img_clip.resize(width=target_w)  # older API
-
-
-        def load_image_clip(path: Path):
-            """Prefer file-backed ImageClip for maximum compatibility."""
-            try:
-                clip = ImageClip(str(path))
-                # Force RGB by passing through PIL once if needed
-                try:
-                    from PIL import Image as _Image
-                    import numpy as _np
-                    im = _Image.open(str(path))
-                    if im.mode not in ("RGB", "L"):
-                        im = im.convert("RGB")
-                        arr = _np.array(im)
-                        clip = ImageClip(arr)
-                except Exception:
-                    pass
-                return clip
-            except Exception:
-                logger.exception("[VideoCompose] Failed to create ImageClip from file: %s", path)
-                raise
-
-        def resize_to_fit(img_clip, target_w: int, target_h: int):
-            try:
-                iw, ih = img_clip.size
-            except Exception:
-                return img_clip
-            try:
-                scale = min(float(target_w) / float(iw), float(target_h) / float(ih))
-                new_w = max(1, int(iw * scale))
-                # keep aspect ratio by width, height will be adjusted by on_color/Composite
-                try:
-                    from moviepy import vfx as _vfx  # type: ignore
-                    return img_clip.fx(_vfx.resize, width=new_w)
-                except Exception:
-                    try:
-                        return img_clip.resize(width=new_w)
-                    except Exception:
-                        return img_clip
-            except Exception:
-                return img_clip
-
-        def center_on_bg(img_clip, duration: float):
-            dur = max(0.1, float(duration))
-            bg = ColorClip(size=(width, height), color=(0, 0, 0))
-            bg = set_duration_compat(bg, dur)
-            ic = resize_to_fit(img_clip, width, height)
-            try:
-                ic = set_duration_compat(ic, dur)
-            except Exception:
-                pass
-            try:
-                comp = CompositeVideoClip([bg, ic.set_position('center')], size=(width, height))
-                comp = set_duration_compat(comp, dur)
-            except Exception:
-                comp = bg
-            return comp
-
-        try:
-            if images or audios:
-                if images and audios:
-                    # Group multiple short audios (segments) under each image according to seg_counts
-                    # Strict check: total audios must equal required segments
-                    required = sum(int(seg_counts[i] if i < len(seg_counts) else 1) for i in range(len(images)))
-                    if len(audios) != required:
-                        raise RuntimeError(f"Audio/page mismatch: required={required}, provided={len(audios)}. Ensure segmented_pages matches generated audios.")
-                    ai = 0  # audio index cursor
-                    for idx_img, img_path in enumerate(images):
-                        k = seg_counts[idx_img] if idx_img < len(seg_counts) else 1
-                        group_audios = []
-                        total_dur = 0.0
-                        for _ in range(k):
-                            apath = audios[ai]
-                            try:
-                                aclip = AudioFileClip(str(apath))
-                                group_audios.append(aclip)
-                                total_dur += float(getattr(aclip, 'duration', 0.0) or 0.0)
-                            except Exception:
-                                logger.exception("[VideoCompose] failed to load audio: %s", apath)
-                                raise
-                            ai += 1
-                        # Build per-page clip with merged audio
-                        img_clip = load_image_clip(Path(img_path))
-                        try:
-                            merged_audio = concatenate_audioclips(group_audios)
-                        except Exception:
-                            # Fallback: use first audio only but keep strictness by raising
-                            logger.exception("[VideoCompose] concatenate_audioclips failed for IMG=%s", Path(img_path).name)
-                            raise
-                        dur = float(getattr(merged_audio, 'duration', 0.0) or total_dur or default_image_duration)
-                        vclip = center_on_bg(img_clip, dur)
-                        vclip = set_audio_compat(vclip, merged_audio)
-                        try:
-                            vclip = vclip.set_fps(fps)
-                        except Exception:
-                            pass
-                        # Debug per-clip properties
-                        try:
-                            sz = getattr(vclip, 'size', None)
-                            has_audio = getattr(vclip, 'audio', None) is not None
-                            logger.info("[VideoCompose] CLIP page=%d size=%s dur=%.3f has_audio=%s", idx_img+1, sz, getattr(vclip, 'duration', 0.0) or 0.0, has_audio)
-                            # Dump a sample frame
-                            try:
-                                frame = vclip.get_frame(min(0.01, max(0.0, (dur or 0.1)*0.1)))
-                                import numpy as _np
-                                # Normalize frame to uint8 RGB for imageio/pillow
-                                try:
-                                    if frame.ndim == 2:
-                                        frame = _np.repeat(frame[..., None], 3, axis=2)
-                                    if frame.shape[-1] == 4:
-                                        frame = frame[..., :3]
-                                    if frame.dtype != _np.uint8:
-                                        if _np.issubdtype(frame.dtype, _np.floating):
-                                            # If in [0,1], scale to [0,255]
-                                            mx = _np.nanmax(frame) if frame.size else 1.0
-                                            if mx <= 1.0:
-                                                frame = (frame * 255.0)
-                                        frame = _np.clip(frame, 0, 255).astype(_np.uint8)
-                                except Exception:
-                                    pass
-                                import imageio.v2 as iio
-                                # Guard against pathological shapes
-                                try:
-                                    h, w, c = frame.shape
-                                    if h < 2 or w < 2:
-                                        logger.warning("[VideoCompose] debug frame has tiny shape %s, skipping write", frame.shape)
-                                    else:
-                                        iio.imwrite(str(story_dir / f"_debug_frame_page{idx_img+1}.png"), frame)
-                                        logger.info("[VideoCompose] wrote debug frame for page %d shape=%s dtype=%s", idx_img+1, frame.shape, frame.dtype)
-                                except Exception:
-                                    # Fallback single write attempt
-                                    iio.imwrite(str(story_dir / f"_debug_frame_page{idx_img+1}.png"), frame)
-                                    logger.info("[VideoCompose] wrote debug frame (fallback) for page %d", idx_img+1)
-                            except Exception:
-                                logger.exception("[VideoCompose] failed to dump debug frame for page %d", idx_img+1)
-                        except Exception:
-                            logger.exception("[VideoCompose] debug inspect failed for page %d", idx_img+1)
-                        clips.append(vclip)
-                elif images:
-                    for idx_img, img_path in enumerate(images):
-                        img_clip = ImageClip(str(img_path))
-                        vclip = center_on_bg(img_clip, default_image_duration)
-                        try:
-                            vclip = vclip.set_fps(fps)
-                        except Exception:
-                            pass
-                        logger.info("[VideoCompose] CLIP page=%d (no audio) size=%s dur=%.3f", idx_img+1, getattr(vclip, 'size', None), getattr(vclip, 'duration', 0.0) or 0.0)
-                        clips.append(vclip)
-                elif audios:
-                    for j, aud_path in enumerate(audios):
-                        aclip = AudioFileClip(str(aud_path))
-                        bg = ColorClip(size=(width, height), color=(0, 0, 0))
-                        vclip = set_duration_compat(bg, aclip.duration)
-                        vclip = set_audio_compat(vclip, aclip)
-                        try:
-                            vclip = vclip.set_fps(fps)
-                        except Exception:
-                            pass
-                        logger.info("[VideoCompose] CLIP audio-only #%d dur=%.3f", j+1, getattr(vclip, 'duration', 0.0) or 0.0)
-                        clips.append(vclip)
-            else:
-                # nothing to compose; raise meaningful error
-                raise RuntimeError("No images or audios found to compose video.")
-
-            logger.info("[VideoCompose] concatenating %d clips...", len(clips))
-            final = concatenate_videoclips(clips, method="compose")
-            logger.info("[VideoCompose] concat result size=%s dur=%.3fs", getattr(final, 'size', None), getattr(final, 'duration', 0.0) or 0.0)
-            # Force final canvas size to avoid backend-specific black frames
-            try:
-                final = CompositeVideoClip([final], size=(width, height))
-                logger.info("[VideoCompose] wrapped final with fixed size=%dx%d", width, height)
-            except Exception:
-                logger.exception("[VideoCompose] failed to wrap final size")
-            # write the file
-            # Compatibility: older MoviePy versions may not support verbose/logger/threads/temp_audiofile
-            _kwargs = dict(
-                fps=fps,
-                codec="libx264",
-                audio_codec="aac",
-                temp_audiofile=str(story_dir / "_temp_audio.m4a"),
-                remove_temp=True,
-                threads=cfg_params.get("threads", 2),
-            )
-            # Prefer widely compatible pixel format to avoid playback black screens
-            _kwargs["ffmpeg_params"] = ["-pix_fmt", "yuv420p"]
-            def _try_write(**extra):
-                try:
-                    kw = dict(_kwargs)
-                    kw.update(extra)
-                    final.write_videofile(str(output), **kw)
-                    return True
-                except TypeError:
-                    return False
-            # Try with all kwargs plus quiet flags
-            if not _try_write(verbose=False, logger=None):
-                # Drop verbose/logger
-                if not _try_write():
-                    # Drop temp_audiofile/threads/ffmpeg_params for maximal compatibility
-                    _kwargs.pop("temp_audiofile", None)
-                    _kwargs.pop("threads", None)
-                    _kwargs.pop("ffmpeg_params", None)
-                    final.write_videofile(str(output), **_kwargs)
-            try:
-                final.close()
-            except Exception:
-                pass
-            return str(output)
-        finally:
-            # best-effort close clips
-            try:
-                for c in clips:
-                    try:
-                        ac = getattr(c, 'audio', None)
-                        if ac is not None:
-                            ac.close()
-                    except Exception:
-                        pass
-                    try:
-                        c.close()
-                    except Exception:
-                        pass
             except Exception:
                 pass
