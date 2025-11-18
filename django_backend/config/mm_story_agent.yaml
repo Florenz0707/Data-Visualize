@@ -67,22 +67,16 @@ video_compose:
     cfg:
         {}
     params:
-        height: *image_height
-        width: *image_width
-        story_dir: *story_dir
         fps: 24
         audio_sample_rate: 44100
         audio_codec: aac
         caption:
             font: resource/font/FiraCode-Regular.ttf
             # bg_color: LightGrey
-            fontsize: 28
+            fontsize: 18
             color: white
             # stroke_color: white
             # stroke_width: 0.5
-            max_length: 50
-            max_words_per_line: 10  # 每行字幕的最大单词数（兼容旧配置）
-            max_chars_per_line: 75   # 每行字幕的最大字符数（新配置，优先于 max_words_per_line）
             workers: 4  # 并行字幕渲染线程数
             enable_captions: true  # 启用字幕（默认）
         slideshow_effect:

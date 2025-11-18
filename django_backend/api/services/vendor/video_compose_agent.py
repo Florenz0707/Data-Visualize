@@ -12,10 +12,6 @@ logger = logging.getLogger(__name__)
 from .base import register_tool
 
 
-# (The rest of this file is a vendored copy adapted to use local imports only.)
-# For brevity, the implementation mirrors the original with no functional changes
-# except imports. See original for detailed comments.
-
 @contextmanager
 def timeout_context(seconds):
     if platform.system() == 'Windows':
@@ -46,121 +42,65 @@ def timeout_context(seconds):
             signal.signal(signal.SIGALRM, old_handler)
 
 
-# The following functions/classes are identical to the original vendor source
-# except for relative imports above.
-# To minimize length, we include only the public API used by services.workflow:
-# - split_text_for_speech
-# - SlideshowVideoComposeAgent (with .call)
+def _format_ass_time(seconds: float) -> str:
+    if seconds < 0:
+        seconds = 0
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    cs = int(round((seconds - int(seconds)) * 100))
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def split_keep_separator(text, separator):
-    pattern = f'([{re.escape(separator)}])'
-    pieces = re.split(pattern, text)
-    return pieces
+def _is_font_path(val: str) -> bool:
+    try:
+        p = Path(val)
+        return p.is_file()
+    except Exception:
+        return False
 
 
-def split_text_for_speech(text, max_chars: int = 60):
-    """
-    Split text into segments by character length.
-    Strategy:
-    1) Respect sentence boundaries first (., !, ?) while protecting common abbreviations.
-    2) If a sentence still exceeds max_chars, try split by ; : , keeping separators.
-    3) Still too long: perform hard character-chunking (<= max_chars), prefer to break on spaces.
-    """
-    import re
+_css_named = {
+    "white": (255, 255, 255),
+    "black": (0, 0, 0),
+    "red": (255, 0, 0),
+    "green": (0, 128, 0),
+    "blue": (0, 0, 255),
+    "yellow": (255, 255, 0),
+    "cyan": (0, 255, 255),
+    "magenta": (255, 0, 255),
+    "gray": (128, 128, 128),
+}
 
-    if not text or not text.strip():
-        return []
 
-    common_abbreviations = [
-        'Dr', 'Mr', 'Mrs', 'Ms', 'Prof', 'Sr', 'Jr', 'Ltd', 'Inc', 'Corp', 'Co',
-        'St', 'Ave', 'Blvd', 'Rd', 'etc', 'vs', 'e.g', 'i.e', 'a.m', 'p.m',
-        'U.S', 'U.K', 'U.N', 'Ph.D', 'M.D', 'B.A', 'M.A', 'Ph.D',
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-        'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
-        'No', 'Nos', 'Vol', 'Vols', 'pp', 'pgs', 'ch', 'chs', 'fig', 'figs', 'ref', 'refs',
-        'Gen', 'Lt', 'Col', 'Maj', 'Capt', 'Sgt', 'Cpl', 'Pvt',
-        'Rev', 'Hon', 'Rt', 'Gov', 'Sen', 'Rep', 'Pres', 'Vice', 'Adm',
-        'Assoc', 'Asst', 'Dir', 'Mgr', 'Exec', 'Admin',
-        'Dept', 'Div', 'Sect', 'Sub', 'Subj',
-        'Tech', 'Eng', 'Sci', 'Math', 'Econ', 'Psych', 'Sociol',
-        'Univ', 'Coll', 'Inst', 'Acad', 'Sch',
-        'Intl', 'Natl', 'Fed', 'Reg', 'Dist', 'Mun',
-        'Min', 'Max', 'Avg', 'Std', 'Var', 'Dev',
-        'Est', 'Aprox', 'Circa', 'ca'
-    ]
-
-    # Protect abbreviations like "Dr." to avoid sentence split on the period
-    protected_text = text
-    abbreviation_markers = {}
-    for i, abbr in enumerate(common_abbreviations):
-        pattern = re.escape(abbr) + r'\.'
-        if re.search(pattern, protected_text):
-            marker = f"__ABBR_{i}__"
-            abbreviation_markers[marker] = abbr + '.'
-            protected_text = re.sub(pattern, marker, protected_text)
-
-    # Split into sentences (keep punctuation)
-    sentences = re.split(r'([.!?]+)', protected_text)
-    complete_sentences = []
-    for i in range(0, len(sentences) - 1, 2):
-        if i + 1 < len(sentences):
-            sentence = (sentences[i] + sentences[i + 1]).strip()
-            if sentence:
-                complete_sentences.append(sentence)
-    if len(sentences) % 2 == 1 and sentences[-1].strip():
-        complete_sentences.append(sentences[-1].strip())
-    if not complete_sentences:
-        complete_sentences = [protected_text.strip()]
-
-    # Restore abbreviations
-    for i, sentence in enumerate(complete_sentences):
-        for marker, original in abbreviation_markers.items():
-            sentence = sentence.replace(marker, original)
-        complete_sentences[i] = sentence
-
-    def chunk_by_chars(s: str, limit: int) -> list[str]:
-        # Prefer breaking on spaces, but ensure progress even if a single token is too long
-        out = []
-        cur = s.strip()
-        while cur:
-            if len(cur) <= limit:
-                out.append(cur)
-                break
-            # find last space within limit
-            cut = cur.rfind(' ', 0, limit + 1)
-            if cut == -1:
-                # no space; hard cut
-                out.append(cur[:limit])
-                cur = cur[limit:].lstrip()
-            else:
-                out.append(cur[:cut])
-                cur = cur[cut + 1:].lstrip()
-        return out
-
-    results = []
-    for sent in complete_sentences:
-        if len(sent) <= max_chars:
-            results.append(sent)
-            continue
-        # try split by ; : , while keeping separators with the previous part
-        protected_sent = sent
-        sub_parts = re.split(r'([;:,])', protected_sent)
-        merged = []
-        for i in range(0, len(sub_parts), 2):
-            part = sub_parts[i].strip()
-            sep = sub_parts[i + 1] if i + 1 < len(sub_parts) else ''
-            if part:
-                merged.append((part + sep).strip())
-        if not merged:
-            merged = [sent]
-        for part in merged:
-            if len(part) <= max_chars:
-                results.append(part)
-            else:
-                results.extend(chunk_by_chars(part, max_chars))
-
-    return results
+def _to_ass_color(val: str, default: str = "&H00FFFFFF") -> str:
+    """Convert #RRGGBB / #RGB / name / &H.. to ASS &HAABBGGRR (alpha=00)."""
+    if not val:
+        return default
+    s = str(val).strip()
+    if s.startswith("&H") or s.startswith("&h"):
+        return s.upper()
+    # Hex #RRGGBB or #RGB
+    if s.startswith("#"):
+        s = s[1:]
+        if len(s) == 3:
+            r = int(s[0] * 2, 16)
+            g = int(s[1] * 2, 16)
+            b = int(s[2] * 2, 16)
+        elif len(s) == 6:
+            r = int(s[0:2], 16)
+            g = int(s[2:4], 16)
+            b = int(s[4:6], 16)
+        else:
+            return default
+        # ASS is AABBGGRR (BGR)
+        return f"&H00{b:02X}{g:02X}{r:02X}"
+    # CSS name
+    rgb = _css_named.get(s.lower())
+    if rgb is not None:
+        r, g, b = rgb
+        return f"&H00{b:02X}{g:02X}{r:02X}"
+    return default
 
 
 @register_tool("slideshow_video_compose")
@@ -168,152 +108,263 @@ class SlideshowVideoComposeAgent:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
 
-    @classmethod
-    def adjust_caption_config(cls, width, height, existing: dict | None = None):
-        existing = dict(existing or {})
-        area_height_default = int(height * 0.06)
-        fontsize_default = int((width + height) / 2 * 0.025)
-        if "area_height" not in existing:
-            existing["area_height"] = area_height_default
-        if "fontsize" not in existing:
-            existing["fontsize"] = fontsize_default
-        return existing
+    @staticmethod
+    def _numeric_key(stem: str, prefix: str) -> int:
+        m = re.search(rf"{prefix}(\d+)$", stem, flags=re.IGNORECASE)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                return 10**9
+        return 10**9
 
-    @classmethod
-    def _gather_assets(cls, story_dir: Path):
-        img_dir = (story_dir / "image")
-        images = []
-        # Gather common image extensions and naming patterns
-        for pattern in ["*.png", "*.jpg", "*.jpeg", "*.webp", "p*.png", "p*.jpg", "p*.jpeg", "p*.webp"]:
-            images.extend(img_dir.glob(pattern))
-        # De-duplicate and sort by name
-        images = sorted({p for p in images}, key=lambda p: p.name)
-
-        aud_dir = (story_dir / "speech")
-        audios = []
-        for pattern in ["*.wav", "s*.wav", "*.mp3", "s*.mp3"]:
-            audios.extend(aud_dir.glob(pattern))
-        audios = sorted({p for p in audios}, key=lambda p: p.name)
-        return images, audios
+    @staticmethod
+    def _numeric_key_pair(stem: str, prefix: str) -> tuple:
+        m = re.search(rf"{prefix}(\d+)_(\d+)$", stem, flags=re.IGNORECASE)
+        if m:
+            try:
+                return int(m.group(1)), int(m.group(2))
+            except Exception:
+                return 10 ** 9, 10 ** 9
+        return 10 ** 9, 10 ** 9
 
     def call(self, params):
-        """Compose a simple slideshow video.
-        Strategy:
-        - If both images and audios exist: pair by index, duration = audio duration.
-        - If only images: each image gets default duration (cfg.params.image_duration or 3s).
-        - If only audios: render a blank background clip with audio (fallback), duration = audio duration.
-        Output: story_dir/output.mp4
-        """
-
         import json
 
         story_dir = Path(params.get("story_dir", ".")).resolve()
         output = story_dir / "output.mp4"
-        cfg_params = dict((self.cfg.get("params") or {}))
-        fps = int(cfg_params.get("fps", 24))
-        size = cfg_params.get("size") or [1280, 720]
-        width, height = int(size[0]), int(size[1])
-        default_image_duration = float(cfg_params.get("image_duration", 3.0))
-        # Environment diagnostics
-        try:
-            import moviepy as _mp
-            logger.info("[VideoCompose] moviepy.__version__=%s", getattr(_mp, "__version__", "unknown"))
-        except Exception:
-            logger.info("[VideoCompose] moviepy version unknown")
-        try:
-            import imageio_ffmpeg
-            logger.info("[VideoCompose] ffmpeg_exe=%s", imageio_ffmpeg.get_ffmpeg_exe())
-        except Exception:
-            logger.info("[VideoCompose] ffmpeg_exe unknown (imageio_ffmpeg not available)")
-        logger.info("[VideoCompose] target=%dx%d fps=%d", width, height, fps)
 
-        images, audios = self._gather_assets(story_dir)
-        logger.info("[VideoCompose] Found %d images and %d audios", len(images), len(audios))
-        if images:
-            logger.info("[VideoCompose] Sample images: %s", ", ".join(str(p.name) for p in images[:5]))
-        if audios:
-            logger.info("[VideoCompose] Sample audios: %s", ", ".join(str(p.name) for p in audios[:5]))
-        # Enforce presence of images; fail fast instead of producing black screen only
+        # Merge base cfg params with call-time params (call overrides base)
+        base_params = (self.cfg.get("params") or {})
+        call_params = {}
+        for k in ("fps", "size", "width", "height", "audio_sample_rate", "audio_codec", "caption"):
+            v = params.get(k)
+            if v is not None:
+                call_params[k] = v
+        cfg_params = {**base_params, **call_params}
+        if not cfg_params:
+            logger.warning("video_compose: cfg_params empty, using defaults")
+
+        # Derive width/height from size or individual fields
+        if cfg_params.get("size"):
+            try:
+                size = cfg_params.get("size")
+                width, height = int(size[0]), int(size[1])
+            except Exception:
+                width = int(cfg_params.get("width", 1280))
+                height = int(cfg_params.get("height", 720))
+        else:
+            width = int(cfg_params.get("width", 1280))
+            height = int(cfg_params.get("height", 720))
+
+        fps = int(cfg_params.get("fps", 24))
+
+        # Caption config: base then call override
+        caption_cfg = {}
+        caption_cfg.update(base_params.get("caption") or {})
+        caption_cfg.update((params.get("caption") or {}))
+        enable_captions = bool(caption_cfg.get("enable_captions", True))
+        area_height = int(caption_cfg.get("area_height", max(24, int(height * 0.06))))
+        font_cfg = caption_cfg.get("font", "Arial")
+        try:
+            fontsize = int(caption_cfg.get("fontsize", 0) or 0)
+        except Exception:
+            fontsize = 0
+        if fontsize <= 0:
+            fontsize = int(max(18, int((width + height) * 0.025)))
+        color = _to_ass_color(caption_cfg.get("color", "#FFFFFF"), "&H00FFFFFF")
+        stroke_color = _to_ass_color(caption_cfg.get("stroke_color", "#000000"), "&H00000000")
+        try:
+            outline = float(caption_cfg.get("stroke_width", 1))
+        except Exception:
+            outline = 1.0
+        try:
+            shadow = float(caption_cfg.get("shadow", 0))
+        except Exception:
+            shadow = 0.0
+        try:
+            alignment = int(caption_cfg.get("alignment", 2))
+        except Exception:
+            alignment = 2
+        try:
+            margin_v = int(caption_cfg.get("margin_v", 10))
+        except Exception:
+            margin_v = 10
+        try:
+            max_chars_line = int(caption_cfg.get("max_chars_per_line", 0) or 0)
+        except Exception:
+            max_chars_line = 0
+
+        # Resolve font path if relative
+        fontsdir = None
+        fontname = str(font_cfg)
+        if isinstance(font_cfg, str):
+            candidate = Path(font_cfg)
+            if not candidate.is_file():
+                # Try BASE_DIR / font_cfg
+                try:
+                    from django.conf import settings as dj_settings
+                    base_dir = Path(dj_settings.BASE_DIR)
+                    cand2 = (base_dir / font_cfg)
+                    if cand2.is_file():
+                        candidate = cand2
+                except Exception:
+                    logger.debug(f"Error: {Exception}")
+            if not candidate.is_file():
+                # Try story_dir / font_cfg
+                cand3 = (story_dir / font_cfg)
+                if cand3.is_file():
+                    candidate = cand3
+            if candidate.is_file():
+                fontsdir = candidate.parent
+                fontname = candidate.stem
+
+        total_height = height + area_height
+        logger.info("[VideoCompose] captions: enable=%s area_height=%d font=%s fontsize=%d color=%s outline=%.2f shadow=%.2f align=%d margin_v=%d fontsdir=%s",
+                    enable_captions, area_height, fontname, fontsize, color, outline, shadow, alignment, margin_v, str(fontsdir) if fontsdir else "(system)")
+
+        # Gather assets
+        img_dir = story_dir / "image"
+        speech_dir = story_dir / "speech"
+        images = sorted([p for p in img_dir.glob("p*."+"*") if p.suffix.lower() in {".png",".jpg",".jpeg",".webp"}],
+                        key=lambda p: (self._numeric_key(p.stem, 'p'), p.name.lower()))
+        audios_global = sorted([p for p in speech_dir.glob("s*."+"*") if p.suffix.lower() in {".wav",".mp3"} and re.match(r"s\d+\.(wav|mp3)$", p.name, re.I)],
+                               key=lambda p: (self._numeric_key(p.stem, 's'), p.name.lower()))
         if not images:
             raise RuntimeError("No images found for composing video.")
-        # Determine per-image audio grouping strictly from segmented_pages
+
+        # segmented_pages
         seg_pages = params.get("segmented_pages")
         if not seg_pages:
-            # try load from script_data.json
-            script_path = story_dir / "script_data.json"
-            if script_path.exists():
-                try:
-                    data = json.loads(script_path.read_text(encoding="utf-8"))
-                    seg_pages = data.get("segmented_pages")
-                except Exception:
-                    seg_pages = None
+            try:
+                data = json.loads((story_dir/"script_data.json").read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            seg_pages = data.get("segmented_pages")
+            if not isinstance(seg_pages, list):
+                pages = data.get("pages")
+                if isinstance(pages, list):
+                    tmp=[(pg.get("segments") or []) for pg in pages]
+                    if any(len(x)>0 for x in tmp):
+                        seg_pages = tmp
         if not isinstance(seg_pages, list) or len(seg_pages) != len(images):
-            raise RuntimeError(
-                "segmented_pages missing or length mismatch with images. Cannot map audio segments per page.")
-        seg_counts = [len(page) for page in seg_pages]
-        if sum(seg_counts) != len(audios):
-            raise RuntimeError(f"Audio/page mismatch: required={sum(seg_counts)}, provided={len(audios)}.")
-        logger.info("[VideoCompose] Per-image segment counts: %s", ",".join(str(x) for x in seg_counts))
+            raise RuntimeError("segmented_pages missing or length mismatch with images.")
+        seg_counts = [len(x) for x in seg_pages]
 
-        # FFmpeg-only pipeline start
-        import shutil
-        ffmpeg_bin = None
+        # Tools
         try:
             import imageio_ffmpeg
-            ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+            ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe(); ffprobe_bin = ffmpeg_bin.replace('ffmpeg','ffprobe')
         except Exception:
-            ffmpeg_bin = "ffmpeg"
+            ffmpeg_bin, ffprobe_bin = "ffmpeg","ffprobe"
 
         def run_ffmpeg(cmd, desc):
-            logger.info("[VideoCompose] ffmpeg %s: %s", desc, " ".join(cmd))
+            logger.info("[VideoCompose] %s: %s", desc, " ".join(cmd))
             p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if p.returncode != 0:
-                logger.error("[VideoCompose] ffmpeg %s failed: rc=%s stderr=%s", desc, p.returncode, p.stderr[-1000:])
-                raise RuntimeError(f"ffmpeg {desc} failed: rc={p.returncode}")
-            else:
-                logger.info("[VideoCompose] ffmpeg %s ok", desc)
+                logger.error("[VideoCompose] %s failed rc=%s stderr_tail=%s", desc, p.returncode, p.stderr[-1000:])
+                raise RuntimeError(f"{desc} failed")
 
+        def ffprobe_dur(p: Path) -> float:
+            pr = subprocess.run([ffprobe_bin,"-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",str(p)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if pr.returncode==0:
+                try: return float(pr.stdout.strip())
+                except Exception: return 0.0
+            return 0.0
+
+        def _wrap_text(txt: str) -> str:
+            if not max_chars_line or not txt:
+                return txt or ""
+            if " " not in txt:
+                return txt
+            words = txt.split()
+            lines = []
+            cur = ""
+            for w in words:
+                if not cur:
+                    cur = w
+                elif len(cur) + 1 + len(w) <= max_chars_line:
+                    cur += " " + w
+                else:
+                    lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
+            return "\\N".join(lines)
+
+        def write_ass(path: Path, lines):
+            primary = color
+            outline_col = stroke_color
+            secondary = "&H000000FF"
+            back = "&H64000000"
+            header=[
+                "[Script Info]",f"PlayResX: {width}",f"PlayResY: {total_height}","WrapStyle: 2","ScaledBorderAndShadow: yes","",
+                "[V4+ Styles]",
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+                f"Style: Default,{fontname},{fontsize},{primary},{secondary},{outline_col},{back},0,0,0,0,100,100,0,0,1,{outline:.2f},{shadow:.2f},{alignment},30,30,{margin_v},1",
+                "",
+                "[Events]","Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+            ]
+            body=[f"Dialogue: 0,{_format_ass_time(st)},{_format_ass_time(et)},Default,,0000,0000,0000,,{_wrap_text(str(txt))}" for st,et,txt in lines]
+            path.write_text("\n".join(header+body)+"\n", encoding="utf-8")
+
+        import shutil
         temp_dir = tempfile.mkdtemp(prefix="ffmpeg_compose_")
         logger.info("[VideoCompose] temp_dir=%s", temp_dir)
         try:
-            # Build per-page videos
-            audio_cursor = 0
-            page_videos = []
-            for idx, img_path in enumerate(images):
-                k = seg_counts[idx]
-                aud_list_path = Path(temp_dir) / f"aud_list_{idx + 1}.txt"
-                with open(aud_list_path, "w", encoding="utf-8") as f:
-                    for j in range(k):
-                        apath = audios[audio_cursor + j]
-                        f.write(f"file '{Path(apath).as_posix()}'\n")
-                audio_cursor += k
-                merged_wav = Path(temp_dir) / f"merged_audio_{idx + 1}.wav"
-                run_ffmpeg(
-                    [ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(aud_list_path), "-c:a", "pcm_s16le",
-                     str(merged_wav)],
-                    f"concat_audio_page{idx + 1}")
+            page_videos=[]
+            audio_global_cursor=0
+            for idx, img in enumerate(images):
+                page = idx+1
+                need = seg_counts[idx]
+                per_page_files = list(speech_dir.glob(f"s{page}_*.wav")) + list(speech_dir.glob(f"s{page}_*.mp3"))
+                if per_page_files:
+                    per_page_files = sorted(per_page_files, key=lambda p: self._numeric_key_pair(p.stem, 's'))
+                    if len(per_page_files) != need:
+                        raise RuntimeError(f"Page {page} audio count mismatch: expected {need}, found {len(per_page_files)}")
+                    page_audios = per_page_files
+                    logger.info("[VideoCompose] page=%d using per-page naming files=%d", page, len(per_page_files))
+                else:
+                    if audio_global_cursor+need > len(audios_global):
+                        raise RuntimeError(f"Insufficient global audios for page {page}")
+                    page_audios = audios_global[audio_global_cursor:audio_global_cursor+need]
+                    audio_global_cursor += need
+                    logger.info("[VideoCompose] page=%d using global slice need=%d", page, need)
 
-                page_mp4 = Path(temp_dir) / f"page_{idx + 1}.mp4"
-                run_ffmpeg([ffmpeg_bin, "-y",
-                            "-loop", "1", "-i", str(img_path),
-                            "-i", str(merged_wav),
-                            "-vf",
-                            f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
-                            "-c:v", "libx264", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-r", str(fps),
-                            "-c:a", "aac", "-shortest", str(page_mp4)],
-                           f"make_page_video_{idx + 1}")
+                durs=[ffprobe_dur(p) for p in page_audios]
+                t=0.0; lines=[]
+                for j,d in enumerate(durs):
+                    st=t; et=t+max(0.01,d); t=et
+                    lines.append((st,et, seg_pages[idx][j] if j < len(seg_pages[idx]) else ""))
+                ass = Path(temp_dir)/f"page_{page}.ass"
+                if enable_captions:
+                    write_ass(ass, lines)
+                    logger.info("[VideoCompose] wrote ASS for page %d -> %s", page, ass)
+
+                list_file = Path(temp_dir)/f"aud_list_{page}.txt"
+                with open(list_file,'w',encoding='utf-8') as f:
+                    for ap in page_audios: f.write(f"file '{ap.as_posix()}'\n")
+                merged = Path(temp_dir)/f"merged_{page}.wav"
+                run_ffmpeg([ffmpeg_bin, "-y","-f","concat","-safe","0","-i",str(list_file),"-c:a","pcm_s16le",str(merged)], f"concat_audio_page{page}")
+
+                vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{total_height}:(ow-iw)/2:0:black"
+                if enable_captions:
+                    if fontsdir:
+                        vf += f",subtitles={ass.as_posix()}:fontsdir={fontsdir.as_posix()}"
+                    else:
+                        vf += f",subtitles={ass.as_posix()}"
+                page_mp4 = Path(temp_dir)/f"page_{page}.mp4"
+                run_ffmpeg([ffmpeg_bin, "-y","-loop","1","-i",str(img),"-i",str(merged),"-vf",vf,
+                            "-c:v","libx264","-tune","stillimage","-pix_fmt","yuv420p","-r",str(fps),
+                            "-c:a","aac","-shortest",str(page_mp4)], f"make_page_video_{page}")
                 page_videos.append(page_mp4)
 
-            # Concat all pages
-            concat_list = Path(temp_dir) / "list.txt"
-            with open(concat_list, "w", encoding="utf-8") as f:
-                for p in page_videos:
-                    f.write(f"file '{p.as_posix()}'\n")
-            run_ffmpeg(
-                [ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(output)],
-                "concat_pages")
-
-            logger.info("[VideoCompose] ffmpeg pipeline completed -> %s", output)
+            concat_list = Path(temp_dir)/"list.txt"
+            with open(concat_list,'w',encoding='utf-8') as f:
+                for p in page_videos: f.write(f"file '{p.as_posix()}'\n")
+            run_ffmpeg([ffmpeg_bin,"-y","-f","concat","-safe","0","-i",str(concat_list),"-c","copy",str(output)], "concat_pages")
+            logger.info("[VideoCompose] done -> %s", output)
             return str(output)
         finally:
             try:

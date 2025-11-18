@@ -162,6 +162,18 @@ def _load_env_file(path):
 
 _load_env_file(BASE_DIR / "config/.env")
 
+# --- Proxy mapping: mirror ALL_PROXY to common envs if not explicitly set ---
+# Many libraries (requests, huggingface_hub, aiohttp) read HTTP(S)_PROXY variables.
+# If user only sets ALL_PROXY, propagate it to those variables to maximize compatibility.
+_all_proxy = os.environ.get("ALL_PROXY") or os.environ.get("all_proxy")
+if _all_proxy:
+    os.environ.setdefault("HTTP_PROXY", _all_proxy)
+    os.environ.setdefault("HTTPS_PROXY", _all_proxy)
+    os.environ.setdefault("http_proxy", _all_proxy)
+    os.environ.setdefault("https_proxy", _all_proxy)
+    # Respect NO_PROXY / no_proxy if provided by user; do not set defaults here.
+
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

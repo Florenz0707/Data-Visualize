@@ -281,10 +281,10 @@ class SpeechAgent:
                 text_segments = split_text_for_speech(page, max_words=25)
                 segmented_pages.append(text_segments)
 
-        audio_file_counter = 1
-        for segments in segmented_pages:
-            for segment in segments:
-                audio_filename = f"s{audio_file_counter}.wav"
+        # Per-page naming: s{page}{idx}.wav (page starts at 1, idx starts at 1)
+        for page_idx, segments in enumerate(segmented_pages, start=1):
+            for seg_idx, segment in enumerate(segments, start=1):
+                audio_filename = f"s{page_idx}_{seg_idx}.wav"  # e.g., page 2, seg 3 -> s2_3.wav
                 audio_file_path = save_path / audio_filename
                 generation_agent.call(
                     save_file=audio_file_path,
@@ -292,5 +292,4 @@ class SpeechAgent:
                     voice=params.get("voice", "default"),
                     sample_rate=self.cfg.get("sample_rate", 16000)
                 )
-                audio_file_counter += 1
         return {"modality": "speech", "segmented_pages": segmented_pages}
