@@ -24,7 +24,7 @@ story_writer:
 # ==================== 文本切分 ====================
 text_split:
     params:
-        max_chars: 60
+        max_chars: 80
         # Post-merge thresholds to avoid overly short segments
         min_chars_per_segment: 15
         min_words_per_segment: 3
@@ -73,7 +73,7 @@ video_compose:
         caption:
             font: resource/font/FiraCode-Regular.ttf
             # bg_color: LightGrey
-            fontsize: 18
+            fontsize: 22
             color: white
             # stroke_color: white
             # stroke_width: 0.5

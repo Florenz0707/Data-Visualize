@@ -5,7 +5,6 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -42,6 +41,77 @@ def timeout_context(seconds):
             signal.signal(signal.SIGALRM, old_handler)
 
 
+# ---- Text split utility (also imported by other modules) ----
+def split_text_for_speech(text: str, max_chars: int = 60):
+    import re as _re
+    if not text or not text.strip():
+        return []
+    common_abbreviations = [
+        'Dr', 'Mr', 'Mrs', 'Ms', 'Prof', 'Sr', 'Jr', 'Ltd', 'Inc', 'Corp', 'Co',
+        'St', 'Ave', 'Blvd', 'Rd', 'etc', 'vs', 'e.g', 'i.e', 'a.m', 'p.m',
+        'U.S', 'U.K', 'U.N', 'Ph.D', 'M.D', 'B.A', 'M.A', 'Ph.D',
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
+        'No', 'Nos', 'Vol', 'Vols', 'pp', 'pgs', 'ch', 'chs', 'fig', 'figs', 'ref', 'refs',
+        'Gen', 'Lt', 'Col', 'Maj', 'Capt', 'Sgt', 'Cpl', 'Pvt', 'Rev', 'Hon', 'Rt', 'Gov', 'Sen',
+        'Rep', 'Pres', 'Vice', 'Adm', 'Assoc', 'Asst', 'Dir', 'Mgr', 'Exec', 'Admin',
+        'Dept', 'Div', 'Sect', 'Sub', 'Subj', 'Tech', 'Eng', 'Sci', 'Math', 'Econ', 'Psych', 'Sociol',
+        'Univ', 'Coll', 'Inst', 'Acad', 'Sch', 'Intl', 'Natl', 'Fed', 'Reg', 'Dist', 'Mun',
+        'Min', 'Max', 'Avg', 'Std', 'Var', 'Dev', 'Est', 'Aprox', 'Circa', 'ca']
+    protected_text = text
+    for i, abbr in enumerate(common_abbreviations):
+        pattern = _re.escape(abbr) + r'\.'
+        protected_text = _re.sub(pattern, f"__ABBR_{i}__", protected_text)
+    sentences = _re.split(r'([.!?]+)', protected_text)
+    complete = []
+    for i in range(0, len(sentences) - 1, 2):
+        if i + 1 < len(sentences):
+            s = (sentences[i] + sentences[i + 1]).strip()
+            if s:
+                complete.append(s)
+    if len(sentences) % 2 == 1 and sentences[-1].strip():
+        complete.append(sentences[-1].strip())
+    if not complete:
+        complete = [protected_text.strip()]
+    # restore abbreviations
+    for i, s in enumerate(complete):
+        s2 = s
+        for j, abbr in enumerate(common_abbreviations):
+            s2 = s2.replace(f"__ABBR_{j}__", abbr + ".")
+        complete[i] = s2
+
+    def chunk_by_chars(s: str, limit: int):
+        out, cur = [], s.strip()
+        while cur:
+            if len(cur) <= limit:
+                out.append(cur)
+                break
+            cut = cur.rfind(' ', 0, limit + 1)
+            if cut == -1:
+                out.append(cur[:limit]); cur = cur[limit:].lstrip()
+            else:
+                out.append(cur[:cut]); cur = cur[cut + 1:].lstrip()
+        return out
+
+    results = []
+    for sent in complete:
+        if len(sent) <= max_chars:
+            results.append(sent); continue
+        parts = _re.split(r'([;:,])', sent)
+        merged = []
+        for i in range(0, len(parts), 2):
+            part = parts[i].strip()
+            sep = parts[i + 1] if i + 1 < len(parts) else ''
+            if part:
+                merged.append((part + sep).strip())
+        if not merged:
+            merged = [sent]
+        for part in merged:
+            if len(part) <= max_chars: results.append(part)
+            else: results.extend(chunk_by_chars(part, max_chars))
+    return results
+
+
 def _format_ass_time(seconds: float) -> str:
     if seconds < 0:
         seconds = 0
@@ -59,7 +129,6 @@ def _is_font_path(val: str) -> bool:
     except Exception:
         return False
 
-
 _css_named = {
     "white": (255, 255, 255),
     "black": (0, 0, 0),
@@ -72,30 +141,21 @@ _css_named = {
     "gray": (128, 128, 128),
 }
 
-
 def _to_ass_color(val: str, default: str = "&H00FFFFFF") -> str:
-    """Convert #RRGGBB / #RGB / name / &H.. to ASS &HAABBGGRR (alpha=00)."""
     if not val:
         return default
     s = str(val).strip()
     if s.startswith("&H") or s.startswith("&h"):
         return s.upper()
-    # Hex #RRGGBB or #RGB
     if s.startswith("#"):
         s = s[1:]
         if len(s) == 3:
-            r = int(s[0] * 2, 16)
-            g = int(s[1] * 2, 16)
-            b = int(s[2] * 2, 16)
+            r = int(s[0] * 2, 16); g = int(s[1] * 2, 16); b = int(s[2] * 2, 16)
         elif len(s) == 6:
-            r = int(s[0:2], 16)
-            g = int(s[2:4], 16)
-            b = int(s[4:6], 16)
+            r = int(s[0:2], 16); g = int(s[2:4], 16); b = int(s[4:6], 16)
         else:
             return default
-        # ASS is AABBGGRR (BGR)
         return f"&H00{b:02X}{g:02X}{r:02X}"
-    # CSS name
     rgb = _css_named.get(s.lower())
     if rgb is not None:
         r, g, b = rgb
@@ -123,14 +183,13 @@ class SlideshowVideoComposeAgent:
         m = re.search(rf"{prefix}(\d+)_(\d+)$", stem, flags=re.IGNORECASE)
         if m:
             try:
-                return int(m.group(1)), int(m.group(2))
+                return (int(m.group(1)), int(m.group(2)))
             except Exception:
-                return 10 ** 9, 10 ** 9
-        return 10 ** 9, 10 ** 9
+                return (10**9, 10**9)
+        return (10**9, 10**9)
 
     def call(self, params):
         import json
-
         story_dir = Path(params.get("story_dir", ".")).resolve()
         output = story_dir / "output.mp4"
 
@@ -145,7 +204,7 @@ class SlideshowVideoComposeAgent:
         if not cfg_params:
             logger.warning("video_compose: cfg_params empty, using defaults")
 
-        # Derive width/height from size or individual fields
+        # Derive width/height from size or fields
         if cfg_params.get("size"):
             try:
                 size = cfg_params.get("size")
@@ -156,13 +215,13 @@ class SlideshowVideoComposeAgent:
         else:
             width = int(cfg_params.get("width", 1280))
             height = int(cfg_params.get("height", 720))
-
         fps = int(cfg_params.get("fps", 24))
 
         # Caption config: base then call override
         caption_cfg = {}
         caption_cfg.update(base_params.get("caption") or {})
         caption_cfg.update((params.get("caption") or {}))
+
         enable_captions = bool(caption_cfg.get("enable_captions", True))
         area_height = int(caption_cfg.get("area_height", max(24, int(height * 0.06))))
         font_cfg = caption_cfg.get("font", "Arial")
@@ -201,7 +260,6 @@ class SlideshowVideoComposeAgent:
         if isinstance(font_cfg, str):
             candidate = Path(font_cfg)
             if not candidate.is_file():
-                # Try BASE_DIR / font_cfg
                 try:
                     from django.conf import settings as dj_settings
                     base_dir = Path(dj_settings.BASE_DIR)
@@ -209,9 +267,8 @@ class SlideshowVideoComposeAgent:
                     if cand2.is_file():
                         candidate = cand2
                 except Exception:
-                    logger.debug(f"Error: {Exception}")
+                    pass
             if not candidate.is_file():
-                # Try story_dir / font_cfg
                 cand3 = (story_dir / font_cfg)
                 if cand3.is_file():
                     candidate = cand3
@@ -278,34 +335,27 @@ class SlideshowVideoComposeAgent:
                 return txt or ""
             if " " not in txt:
                 return txt
-            words = txt.split()
-            lines = []
-            cur = ""
+            words = txt.split(); lines = []; cur = ""
             for w in words:
                 if not cur:
                     cur = w
                 elif len(cur) + 1 + len(w) <= max_chars_line:
                     cur += " " + w
                 else:
-                    lines.append(cur)
-                    cur = w
-            if cur:
-                lines.append(cur)
+                    lines.append(cur); cur = w
+            if cur: lines.append(cur)
             return "\\N".join(lines)
 
         def write_ass(path: Path, lines):
-            primary = color
-            outline_col = stroke_color
-            secondary = "&H000000FF"
-            back = "&H64000000"
+            primary = color; outline_col = stroke_color
+            secondary = "&H000000FF"; back = "&H64000000"
             header=[
                 "[Script Info]",f"PlayResX: {width}",f"PlayResY: {total_height}","WrapStyle: 2","ScaledBorderAndShadow: yes","",
                 "[V4+ Styles]",
                 "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
                 f"Style: Default,{fontname},{fontsize},{primary},{secondary},{outline_col},{back},0,0,0,0,100,100,0,0,1,{outline:.2f},{shadow:.2f},{alignment},30,30,{margin_v},1",
                 "",
-                "[Events]","Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
-            ]
+                "[Events]","Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
             body=[f"Dialogue: 0,{_format_ass_time(st)},{_format_ass_time(et)},Default,,0000,0000,0000,,{_wrap_text(str(txt))}" for st,et,txt in lines]
             path.write_text("\n".join(header+body)+"\n", encoding="utf-8")
 
@@ -313,12 +363,10 @@ class SlideshowVideoComposeAgent:
         temp_dir = tempfile.mkdtemp(prefix="ffmpeg_compose_")
         logger.info("[VideoCompose] temp_dir=%s", temp_dir)
         try:
-            page_videos=[]
-            audio_global_cursor=0
+            page_videos=[]; audio_global_cursor=0
             for idx, img in enumerate(images):
-                page = idx+1
-                need = seg_counts[idx]
-                per_page_files = list(speech_dir.glob(f"s{page}_*.wav")) + list(speech_dir.glob(f"s{page}_*.mp3"))
+                page = idx+1; need = seg_counts[idx]
+                per_page_files = list((story_dir/"speech").glob(f"s{page}_*.wav")) + list((story_dir/"speech").glob(f"s{page}_*.mp3"))
                 if per_page_files:
                     per_page_files = sorted(per_page_files, key=lambda p: self._numeric_key_pair(p.stem, 's'))
                     if len(per_page_files) != need:
@@ -331,7 +379,6 @@ class SlideshowVideoComposeAgent:
                     page_audios = audios_global[audio_global_cursor:audio_global_cursor+need]
                     audio_global_cursor += need
                     logger.info("[VideoCompose] page=%d using global slice need=%d", page, need)
-
                 durs=[ffprobe_dur(p) for p in page_audios]
                 t=0.0; lines=[]
                 for j,d in enumerate(durs):
@@ -341,14 +388,12 @@ class SlideshowVideoComposeAgent:
                 if enable_captions:
                     write_ass(ass, lines)
                     logger.info("[VideoCompose] wrote ASS for page %d -> %s", page, ass)
-
                 list_file = Path(temp_dir)/f"aud_list_{page}.txt"
                 with open(list_file,'w',encoding='utf-8') as f:
                     for ap in page_audios: f.write(f"file '{ap.as_posix()}'\n")
                 merged = Path(temp_dir)/f"merged_{page}.wav"
                 run_ffmpeg([ffmpeg_bin, "-y","-f","concat","-safe","0","-i",str(list_file),"-c:a","pcm_s16le",str(merged)], f"concat_audio_page{page}")
-
-                vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{total_height}:(ow-iw)/2:0:black"
+                vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height+area_height}:(ow-iw)/2:0:black"
                 if enable_captions:
                     if fontsdir:
                         vf += f",subtitles={ass.as_posix()}:fontsdir={fontsdir.as_posix()}"
@@ -359,7 +404,6 @@ class SlideshowVideoComposeAgent:
                             "-c:v","libx264","-tune","stillimage","-pix_fmt","yuv420p","-r",str(fps),
                             "-c:a","aac","-shortest",str(page_mp4)], f"make_page_video_{page}")
                 page_videos.append(page_mp4)
-
             concat_list = Path(temp_dir)/"list.txt"
             with open(concat_list,'w',encoding='utf-8') as f:
                 for p in page_videos: f.write(f"file '{p.as_posix()}'\n")
@@ -367,7 +411,5 @@ class SlideshowVideoComposeAgent:
             logger.info("[VideoCompose] done -> %s", output)
             return str(output)
         finally:
-            try:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
+            try: shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception: pass
