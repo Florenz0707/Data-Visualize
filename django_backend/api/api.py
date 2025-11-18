@@ -27,9 +27,117 @@ from .schemas import (
     TaskListOut, ExecuteOut,
 )
 
-# (Lazy import of Celery task inside view to avoid heavy deps during Django startup/migrate)
-
 api = NinjaAPI(title="MM-StoryAgent Backend")
+
+
+# --- Helpers for redo semantics ---
+
+def _safe_remove(p: Path):
+    try:
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        elif p.exists():
+            p.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _prepare_redo(task: Task, start_segment: int) -> None:
+    """Prepare redo starting from start_segment (1..5):
+    - Reset TaskSegment >= start_segment to pending
+    - Delete Resource rows for segments >= start_segment
+    - Remove generated files on disk accordingly
+    - Set task.current_segment = start_segment - 1 and status to running
+    """
+    if start_segment < 1 or start_segment > 5:
+        raise HttpError(400, "Invalid segmentId")
+
+    story_dir = Path(task.ensure_story_dir()).resolve()
+
+    # DB updates
+    with transaction.atomic():
+        segs = task.segments.select_for_update().filter(segment_id__gte=start_segment)
+        segs.update(status="pending", error_message="", started_at=None, ended_at=None)
+        Resource.objects.filter(task=task, segment_id__gte=start_segment).delete()
+        task.current_segment = start_segment - 1
+        task.status = "running"
+        task.save(update_fields=["current_segment", "status"])
+
+    # Filesystem cleanup according to start_segment
+    try:
+        if start_segment <= 1:
+            # wipe everything under story_dir
+            for child in story_dir.iterdir():
+                _safe_remove(child)
+        elif start_segment == 2:
+            _safe_remove(story_dir / "image")
+            _safe_remove(story_dir / "speech")
+            _safe_remove(story_dir / "output.mp4")
+        elif start_segment == 3:
+            _safe_remove(story_dir / "speech")
+            _safe_remove(story_dir / "output.mp4")
+            # remove segmented info from script_data.json
+            sp = story_dir / "script_data.json"
+            if sp.exists():
+                try:
+                    data = json.loads(sp.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and "segmented_pages" in data:
+                        data.pop("segmented_pages", None)
+                        sp.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+                except Exception:
+                    pass
+        elif start_segment == 4:
+            _safe_remove(story_dir / "speech")
+            _safe_remove(story_dir / "output.mp4")
+        elif start_segment == 5:
+            _safe_remove(story_dir / "output.mp4")
+    finally:
+        (story_dir / "image").mkdir(parents=True, exist_ok=True)
+        (story_dir / "speech").mkdir(parents=True, exist_ok=True)
+
+
+@api.get("/resource")
+def download_resource(request: HttpRequest, url: str):
+    user = auth_from_header(request.headers.get("Authorization"))
+    if not user:
+        raise HttpError(401, "Unauthorized")
+
+    try:
+        rel = Path(url)
+    except Exception:
+        raise HttpError(400, "Invalid url")
+    if rel.is_absolute() or ".." in rel.parts:
+        raise HttpError(400, "Invalid url")
+
+    res_qs = Resource.objects.filter(path=str(rel), task__user=user)
+    if not res_qs.exists():
+        raise HttpError(404, "Resource not found")
+    res = res_qs.select_related("task").order_by("-id").first()
+    task = res.task
+
+    story_dir = Path(task.story_dir).resolve()
+    base_dir = Path(settings.BASE_DIR).resolve()
+    abs_path = (base_dir / rel).resolve()
+
+    try:
+        if not abs_path.is_file() or not abs_path.is_relative_to(story_dir):
+            raise ValueError
+    except AttributeError:
+        if not abs_path.is_file() or str(abs_path).find(str(story_dir)) != 0:
+            raise HttpError(403, "Forbidden")
+
+    async def _iter_file_async(path: Path, chunk_size: int = 8192):
+        async with aiofiles.open(path, "rb") as f:
+            while True:
+                chunk = await f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    mime, _ = mimetypes.guess_type(str(abs_path))
+    resp = StreamingHttpResponse(_iter_file_async(abs_path), content_type=mime or "application/octet-stream")
+    resp["Content-Disposition"] = f'attachment; filename="{abs_path.name}"'
+    return resp
 
 
 @api.post("/register", response={200: RegisterOut})
@@ -49,7 +157,6 @@ def login(request: HttpRequest, payload: LoginIn):
     access_token = create_access_token(user)
     refresh_token = create_refresh_token(user)
 
-    # Build response and set cookie (no extra response param needed)
     data = LoginOut(access_token=access_token).model_dump()
     response = api.create_response(request, data, status=200)
     response.set_cookie(
@@ -100,7 +207,6 @@ def task_new(request: HttpRequest, payload: TaskNewIn):
         current_segment=0,
     )
     task.ensure_story_dir()
-    # Pre-create TaskSegment entries
     for segment in WorkflowDefinition.get_active_segments():
         TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending")
     return TaskNewOut(task_id=task.id)
@@ -123,11 +229,7 @@ def my_tasks(request: HttpRequest):
 
 
 @api.get("/task/{task_id}/resource")
-def task_resource(request: HttpRequest, task_id: int, segmentId: int, name: Optional[str] = None):
-    """Download resources for a completed segment.
-    - If a single file exists (or name provided), return it directly as attachment.
-    - If multiple files and no name provided, return a zip archive.
-    """
+def task_resource(request: HttpRequest, task_id: int, segmentId: int):
     user = require_user(request)
     task = Task.objects.filter(id=task_id, user=user).first()
     if not task:
@@ -136,151 +238,36 @@ def task_resource(request: HttpRequest, task_id: int, segmentId: int, name: Opti
     if task.current_segment < segmentId:
         raise HttpError(400, "Segment not completed yet")
 
-    story_dir = Path(task.story_dir).resolve()
-    resources = list(Resource.objects.filter(task=task, segment_id=segmentId).values_list("path", flat=True))
-    if not resources:
-        raise HttpError(404, "No resources for this segment")
-
-    async def _iter_file_async(path: Path, chunk_size: int = 8192):
-        async with aiofiles.open(path, "rb") as f:
-            while True:
-                chunk = await f.read(chunk_size)
-                if not chunk:
-                    break
-                yield chunk
-
-    def _build_async_file_response(fpath: Path, filename: Optional[str] = None, content_type: Optional[str] = None):
-        resp = StreamingHttpResponse(_iter_file_async(fpath), content_type=content_type or "application/octet-stream")
-        display_name = filename or fpath.name
-        resp["Content-Disposition"] = f'attachment; filename="{display_name}"'
-        return resp
-
     base_dir = Path(settings.BASE_DIR).resolve()
 
-    def _safe_path(p: str) -> Path:
-        # p is a relative path from DB; join with project root to get absolute path
-        q = (base_dir / p).resolve()
-        # Ensure resource is under this task's story_dir (which is also absolute)
+    urls_db = list(Resource.objects.filter(task=task, segment_id=segmentId).values_list("path", flat=True))
+    if not urls_db:
+        raise HttpError(404, "No resources for this segment")
+
+    urls: List[str] = []
+    for p in urls_db:
         try:
-            if not q.is_file() or not q.is_relative_to(story_dir):
-                raise ValueError
-        except AttributeError:
-            # Fallback for older Python (not needed on 3.13): manual check
-            if not q.is_file() or str(q).find(str(story_dir)) != 0:
-                raise ValueError
-        return q
-
-    # If client specified a name, try return that file
-    if name:
-        cand = [r for r in resources if Path(r).name == name]
-        if not cand:
-            raise HttpError(404, "Requested file not found in resources")
-        fpath = _safe_path(cand[0])
-        mime, _ = mimetypes.guess_type(str(fpath))
-        return _build_async_file_response(fpath, content_type=mime or "application/octet-stream")
-
-    # No specific name: if only one file, return it; else zip them
-    if len(resources) == 1:
-        fpath = _safe_path(resources[0])
-        mime, _ = mimetypes.guess_type(str(fpath))
-        return _build_async_file_response(fpath, content_type=mime or "application/octet-stream")
-
-    # Multiple files: stream a zip
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"-task{task_id}-seg{segmentId}.zip")
-    tmp_path = Path(tmp.name)
-    tmp.close()
-    try:
-        with zipfile.ZipFile(tmp_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for r in resources:
-                fpath = _safe_path(r)
-                # Archive with relative path inside the task directory
+            pp = Path(p)
+            if pp.is_absolute():
                 try:
-                    arcname = fpath.relative_to(story_dir)
-                except ValueError:
-                    arcname = fpath.name
-                zf.write(fpath, arcname=str(arcname))
-        return _build_async_file_response(tmp_path, filename=f"task{task_id}-segment{segmentId}.zip", content_type="application/zip")
-    except Exception as e:
-        # Best-effort cleanup on error
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
-        raise HttpError(500, f"Failed to prepare download: {e}")
-
-
-def _record_resources(task: Task, segment_id: int, paths: List[str], rtype: str):
-    for p in paths:
-        Resource.objects.create(task=task, segment_id=segment_id, type=rtype, path=str(p))
-
-
-def _prepare_redo(task: Task, start_segment: int) -> None:
-    """Prepare redo starting from start_segment (1..5):
-    - Reset TaskSegment >= start_segment to pending
-    - Delete Resource rows for segments >= start_segment
-    - Remove generated files on disk accordingly
-    - Set task.current_segment = start_segment - 1 and status to running
-    """
-    if start_segment < 1 or start_segment > 5:
-        raise HttpError(400, "Invalid segmentId")
-
-    story_dir = Path(task.ensure_story_dir()).resolve()
-
-    # 1) DB updates: reset segments and remove resources
-    with transaction.atomic():
-        # reset segments >= start_segment
-        segs = task.segments.select_for_update().filter(segment_id__gte=start_segment)
-        segs.update(status="pending", error_message="", started_at=None, ended_at=None)
-        # delete resources >= start_segment
-        Resource.objects.filter(task=task, segment_id__gte=start_segment).delete()
-        # update task pointer
-        task.current_segment = start_segment - 1
-        # Keep task running to reflect that it is ready to re-run
-        task.status = "running"
-        task.save(update_fields=["current_segment", "status"])
-
-    # 2) Filesystem cleanup according to start_segment
-    def _safe_rm(p: Path):
-        try:
-            if p.is_dir():
-                shutil.rmtree(p, ignore_errors=True)
-            elif p.exists():
-                p.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-    try:
-        if start_segment <= 1:
-            # wipe everything under story_dir
-            for child in story_dir.iterdir():
-                _safe_rm(child if child.is_dir() else child)
-        elif start_segment == 2:
-            _safe_rm(story_dir / "image")
-            _safe_rm(story_dir / "speech")
-            _safe_rm(story_dir / "output.mp4")
-        elif start_segment == 3:
-            # remove speech and final video
-            _safe_rm(story_dir / "speech")
-            _safe_rm(story_dir / "output.mp4")
-            # remove segmented info from script_data.json (if exists)
-            script = story_dir / "script_data.json"
-            if script.exists():
-                try:
-                    data = json.loads(script.read_text(encoding="utf-8"))
-                    if isinstance(data, dict) and "segmented_pages" in data:
-                        data.pop("segmented_pages", None)
-                        script.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+                    rel = Path(p).resolve().relative_to(base_dir)
+                    urls.append(rel.as_posix())
                 except Exception:
-                    pass
-        elif start_segment == 4:
-            _safe_rm(story_dir / "speech")
-            _safe_rm(story_dir / "output.mp4")
-        elif start_segment == 5:
-            _safe_rm(story_dir / "output.mp4")
-    finally:
-        # ensure directories exist for future steps
-        (story_dir / "image").mkdir(parents=True, exist_ok=True)
-        (story_dir / "speech").mkdir(parents=True, exist_ok=True)
+                    s = str(pp); bs = str(base_dir)
+                    if s.startswith(bs):
+                        urls.append(s[len(bs):].lstrip("/\\"))
+                    else:
+                        urls.append(pp.as_posix())
+            else:
+                urls.append(pp.as_posix())
+        except Exception:
+            continue
+
+    if not urls:
+        raise HttpError(404, "No resources for this segment")
+
+    payload = {"segmentId": int(segmentId), "urls": urls}
+    return api.create_response(request, payload, status=200)
 
 
 @api.post("/task/{task_id}/execute/{segmentId}", response={200: ExecuteOut})
@@ -292,28 +279,22 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int, redo: bo
     if not task:
         raise HttpError(404, "Task not found")
 
-    # If redo requested from an already completed segment, prepare rollback first
     if redo and segmentId <= task.current_segment:
-        # reject if any segment is running
         running_exists = task.segments.filter(status="running").exists()
         if running_exists:
             raise HttpError(409, "Task is running, retry later")
         _prepare_redo(task, segmentId)
-        # reload task after DB updates
         task.refresh_from_db()
 
-    # Normal forward-only constraint after possible redo
     if segmentId != task.current_segment + 1:
         raise HttpError(400, "Segment cannot be executed out of order")
 
-    # mark segment running and enqueue async job
     task.ensure_story_dir()
     seg = task.segments.filter(segment_id=segmentId).first()
     if not seg:
         raise HttpError(400, "Unknown segment")
 
     if seg.status == "running":
-        # already queued/running, idempotent response
         async_id = None
     else:
         seg.status = "running"
@@ -324,13 +305,11 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int, redo: bo
         if task.status in ("pending", "failed"):
             task.status = "running"
             task.save(update_fields=["status"])
-        # Lazy import here to avoid importing heavy deps during Django startup/migrate
         from .tasks import execute_task_segment
         async_res = execute_task_segment.delay(task.id, segmentId)
         async_id = async_res.id
 
     data = ExecuteOut(accepted=True, celery_task_id=async_id, message="Execution queued")
-    # Return 202 Accepted
     return api.create_response(request, data.model_dump(), status=202)
 
 
