@@ -25,6 +25,9 @@ story_writer:
 text_split:
     params:
         max_chars: 60
+        # Post-merge thresholds to avoid overly short segments
+        min_chars_per_segment: 15
+        min_words_per_segment: 3
 
 # ==================== 语音合成 ====================
 speech_generation:

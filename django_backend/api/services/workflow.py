@@ -121,6 +121,47 @@ class WorkflowRunner:
         if pages is None:
             pages = [p.get("story", "") for p in script.get("pages", [])]
         segmented = [split_text_for_speech(page, max_chars=max_chars) for page in pages]
+
+        # thresholds from config (with sensible defaults)
+        ts_params = self.base_cfg.get("text_split", {}).get("params", {})
+        min_chars_short = int(ts_params.get("min_chars_per_segment", 15))
+        min_words_short = int(ts_params.get("min_words_per_segment", 3))
+
+        # Post-process: merge too-short segments to avoid 1-2 word chunks
+        def _word_count(s: str) -> int:
+            # Rough word count: split on whitespace; for CJK text without spaces, count as len(s)
+            if any(ch.isspace() for ch in s):
+                return len([w for w in s.strip().split() if w])
+            return max(1, len(s))
+
+        def _merge_short_segments(segments: List[str], min_chars: int = 15, min_words: int = 3) -> List[str]:
+            if not segments:
+                return segments
+            merged: List[str] = []
+            for seg in segments:
+                cur = seg.strip()
+                if not cur:
+                    continue
+                too_short = (len(cur) < min_chars) or (_word_count(cur) < min_words)
+                if too_short and merged:
+                    # Try merge with previous
+                    prev = merged.pop()
+                    # If both are latin-ish with spaces, join with space; else direct concat
+                    if any(c.isalpha() and c.lower() == c for c in (cur + prev)) and (" " in prev or " " in cur):
+                        new = (prev.rstrip() + " " + cur.lstrip()).strip()
+                    else:
+                        new = (prev + cur)
+                    merged.append(new)
+                else:
+                    merged.append(cur)
+            # If first still short and there is more than one, merge forward
+            if len(merged) >= 2 and ((len(merged[0]) < min_chars) or (_word_count(merged[0]) < min_words)):
+                merged[1] = (merged[0].rstrip() + (" " if (" " in merged[0] or " " in merged[1]) else "") + merged[1].lstrip()).strip()
+                merged = merged[1:]
+            return merged
+
+        segmented = [_merge_short_segments(segs) for segs in segmented]
+
         script["segmented_pages"] = segmented
         self._save_script(Path(story_dir), script)
         return segmented
