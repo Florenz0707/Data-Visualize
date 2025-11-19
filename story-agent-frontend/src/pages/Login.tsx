@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { authApi } from '../lib/api';
 
 const Login: React.FC = () => {
   const [isRegister, setIsRegister] = useState(false);
@@ -14,10 +15,16 @@ const Login: React.FC = () => {
     e.preventDefault();
     setError('');
     try {
-      await login({ username, password });
+      if (isRegister) {
+        await authApi.register({ username, password });
+        await login({ username, password });
+      } else {
+        await login({ username, password });
+      }
       navigate('/');
-    } catch (err) {
-      setError('操作失败，请检查用户名密码');
+    } catch (err: any) {
+      console.error(err);
+      setError(isRegister ? '注册失败，请重试' : '登录失败，请检查用户名密码');
     }
   };
 
@@ -51,7 +58,10 @@ const Login: React.FC = () => {
             {isRegister ? '注册并登录' : '登录'}
           </button>
         </form>
-        <div className="mt-4 text-center text-sm text-blue-500 cursor-pointer" onClick={() => setIsRegister(!isRegister)}>
+        <div className="mt-4 text-center text-sm text-blue-500 cursor-pointer" onClick={() => {
+            setIsRegister(!isRegister);
+            setError('');
+        }}>
           {isRegister ? '已有账号？去登录' : '没有账号？去注册'}
         </div>
       </div>

@@ -1,5 +1,4 @@
 import axios from 'axios';
-// 修复：添加缺失的类型导入
 import type { WorkflowStep, TaskProgress, ResourceResponse } from '../types';
 
 const API_BASE_URL = '/api';
@@ -25,7 +24,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    
+    const isLoginRequest = originalRequest.url?.endsWith('/login');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isLoginRequest) {
       originalRequest._retry = true;
       try {
         const { data } = await axios.post(`${API_BASE_URL}/refresh`);
