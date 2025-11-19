@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 from typing import Dict, List
 
 # Ensure project root on path and load env
 from .bootstrap import *  # noqa: F401
 from .vendor.base import init_tool_instance
 from .vendor.model_config import get_model_config_instance, load_model_for_agent
+
+logger = logging.getLogger(__name__)
+
+ALLOWED_BGM_EXTENSIONS = {".mp3", ".wav", ".flac"}
 
 
 class WorkflowRunner:
@@ -200,6 +206,35 @@ class WorkflowRunner:
         if segmented_pages is None:
             segmented_pages = script.get("segmented_pages")
         params = compose_cfg.get("params", {}).copy()
+
+        # Resolve optional background music path
+        raw_bgm = params.get("bgm_path")
+        resolved_bgm = None
+        if raw_bgm:
+            from django.conf import settings as dj_settings
+
+            candidate = Path(raw_bgm)
+            if not candidate.is_absolute():
+                candidate = (Path(dj_settings.BASE_DIR) / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            if candidate.is_file():
+                suffix = candidate.suffix.lower()
+                if suffix in ALLOWED_BGM_EXTENSIONS:
+                    resolved_bgm = candidate
+                else:
+                    logger.warning(
+                        "Configured BGM file has unsupported extension '%s'. Allowed: %s",
+                        suffix,
+                        sorted(ALLOWED_BGM_EXTENSIONS),
+                    )
+            else:
+                logger.warning("Configured BGM file not found, skipping: %s", raw_bgm)
+        if resolved_bgm:
+            params["bgm_path"] = str(resolved_bgm)
+        else:
+            params.pop("bgm_path", None)
+
         # Always use task-specific story_dir instead of config default
         params["story_dir"] = str(Path(story_dir))
         params["pages"] = pages
