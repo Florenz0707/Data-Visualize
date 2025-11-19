@@ -162,12 +162,11 @@ cython_debug/
 #.idea/
 
 
-
-resources
 # generated stories
-generated_stories
+generated_stories/
+resource/
 
-.vscode
+.vscode/
 
 backup/
-.wsl/
+

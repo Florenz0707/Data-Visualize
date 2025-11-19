@@ -408,8 +408,57 @@ class SlideshowVideoComposeAgent:
             with open(concat_list,'w',encoding='utf-8') as f:
                 for p in page_videos: f.write(f"file '{p.as_posix()}'\n")
             run_ffmpeg([ffmpeg_bin,"-y","-f","concat","-safe","0","-i",str(concat_list),"-c","copy",str(output)], "concat_pages")
+
+            # Optional background music mixing
+            bgm_path = params.get("bgm_path")
+            if bgm_path:
+                bgm_file = Path(bgm_path)
+                logger.debug(f"bgm_file: {bgm_file}")
+                if bgm_file.is_file():
+                    suffix = bgm_file.suffix.lower()
+                    allowed_exts = {".mp3", ".wav", ".flac"}
+                    if suffix not in allowed_exts:
+                        logger.warning("[VideoCompose] Unsupported BGM extension '%s'. Supported: %s", suffix, sorted(allowed_exts))
+                    else:
+                        try:
+                            bgm_volume = params.get("bgm_volume", cfg_params.get("bgm_volume", 0.25))
+                            try:
+                                bgm_volume = float(bgm_volume)
+                            except Exception:
+                                bgm_volume = 0.25
+
+                            mixed_output = output.with_name(output.stem + "_bgm.mp4")
+                            # Loop BGM to match narration length and mix
+                            filter_complex = (
+                                f"[1:a]volume={bgm_volume},aloop=loop=-1:size=0[a1];"
+                                f"[0:a][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                            )
+                            run_ffmpeg(
+                                [
+                                    ffmpeg_bin,
+                                    "-y",
+                                    "-i", str(output),
+                                    "-i", str(bgm_file),
+                                    "-filter_complex", filter_complex,
+                                    "-map", "0:v:0",
+                                    "-map", "[aout]",
+                                    "-c:v", "copy",
+                                    "-c:a", cfg_params.get("audio_codec", "aac"),
+                                    "-shortest",
+                                    str(mixed_output),
+                                ],
+                                "mix_bgm",
+                            )
+                            shutil.move(mixed_output, output)
+                            logger.info("[VideoCompose] mixed background music from %s", bgm_file)
+                        except Exception as exc:
+                            logger.warning("[VideoCompose] failed to mix BGM: %s", exc)
+                else:
+                    logger.warning("[VideoCompose] bgm_path provided but file missing: %s", bgm_file)
+
             logger.info("[VideoCompose] done -> %s", output)
             return str(output)
         finally:
             try: shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception: pass
+            except Exception: 
+                pass

@@ -84,6 +84,8 @@ video_compose:
             slide_duration: 0.2
             zoom_speed: 0.5
             move_ratio: 0.9
+        bgm_path: "resource/bgm/Summer.flac"
+        bgm_volume: 0.25  # Optional volume multiplier (0-1). Default 0.25 when mixing
 
 
 # ==================== 可选：音乐生成 ====================
