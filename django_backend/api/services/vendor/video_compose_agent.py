@@ -11,6 +11,21 @@ logger = logging.getLogger(__name__)
 from .base import register_tool
 
 
+def ffmpeg_has_filter(bin_path: str, name: str) -> bool:
+    try:
+        pr = subprocess.run([bin_path, "-hide_banner", "-filters"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if pr.returncode != 0:
+            return False
+        out = pr.stdout or ""
+        name_l = name.strip().lower()
+        for line in out.splitlines():
+            if name_l in line.lower():
+                return True
+        return False
+    except Exception:
+        return False
+
+
 @contextmanager
 def timeout_context(seconds):
     if platform.system() == 'Windows':
@@ -195,12 +210,8 @@ class SlideshowVideoComposeAgent:
 
         # Merge base cfg params with call-time params (call overrides base)
         base_params = (self.cfg.get("params") or {})
-        call_params = {}
-        for k in ("fps", "size", "width", "height", "audio_sample_rate", "audio_codec", "caption"):
-            v = params.get(k)
-            if v is not None:
-                call_params[k] = v
-        cfg_params = {**base_params, **call_params}
+        # Allow passing through all params (not just a whitelist) so new effects are configurable
+        cfg_params = {**base_params, **(params or {})}
         if not cfg_params:
             logger.warning("video_compose: cfg_params empty, using defaults")
 
@@ -216,6 +227,46 @@ class SlideshowVideoComposeAgent:
             width = int(cfg_params.get("width", 1280))
             height = int(cfg_params.get("height", 720))
         fps = int(cfg_params.get("fps", 24))
+
+        # Effects configuration
+        enable_fade = bool(cfg_params.get("enable_fade", False))
+        try:
+            fade_in = float(cfg_params.get("fade_in", 0.5))
+        except Exception:
+            fade_in = 0.5
+        try:
+            fade_out = float(cfg_params.get("fade_out", 0.5))
+        except Exception:
+            fade_out = 0.5
+        try:
+            fade_mode = str(cfg_params.get("fade_mode", "ends")).lower()
+        except Exception:
+            fade_mode = "ends"
+
+        enable_kb = bool(cfg_params.get("enable_ken_burns", False))
+        try:
+            kb_zoom_start = float(cfg_params.get("kb_zoom_start", 1.0))
+        except Exception:
+            kb_zoom_start = 1.0
+        try:
+            kb_zoom_end = float(cfg_params.get("kb_zoom_end", 1.1))
+        except Exception:
+            kb_zoom_end = 1.1
+        try:
+            kb_direction = str(cfg_params.get("kb_direction", "center")).lower()
+        except Exception:
+            kb_direction = "center"
+        # normalize values
+        if kb_zoom_end < kb_zoom_start:
+            kb_zoom_end, kb_zoom_start = kb_zoom_start, kb_zoom_end
+
+        # Crossfade between pages
+        enable_crossfade = bool(cfg_params.get("enable_crossfade", False))
+        try:
+            crossfade = float(cfg_params.get("crossfade", 0.25))
+        except Exception:
+            crossfade = 0.25
+        enable_audio_crossfade = bool(cfg_params.get("enable_audio_crossfade", False))
 
         # Caption config: base then call override
         caption_cfg = {}
@@ -314,6 +365,25 @@ class SlideshowVideoComposeAgent:
             ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe(); ffprobe_bin = ffmpeg_bin.replace('ffmpeg','ffprobe')
         except Exception:
             ffmpeg_bin, ffprobe_bin = "ffmpeg","ffprobe"
+        # Allow explicit override via params (e.g., to point to a custom static ffmpeg build)
+        user_ffmpeg = cfg_params.get("ffmpeg_bin")
+        if user_ffmpeg:
+            ffmpeg_bin = str(user_ffmpeg)
+            ffprobe_bin = "ffprobe" if ffmpeg_bin == "ffmpeg" else ffmpeg_bin.replace("ffmpeg", "ffprobe")
+        # Prefer an ffmpeg that has required filters when crossfade is enabled
+        if enable_crossfade and not user_ffmpeg:
+            candidates = []
+            seen = set()
+            for c in [ffmpeg_bin, "ffmpeg", "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
+                if c and c not in seen:
+                    candidates.append(c); seen.add(c)
+            chosen = None
+            for cand in candidates:
+                if ffmpeg_has_filter(cand, "xfade"):
+                    chosen = cand; break
+            if chosen and chosen != ffmpeg_bin:
+                ffmpeg_bin = chosen
+                ffprobe_bin = "ffprobe" if chosen == "ffmpeg" else chosen.replace("ffmpeg", "ffprobe")
 
         def run_ffmpeg(cmd, desc):
             logger.info("[VideoCompose] %s: %s", desc, " ".join(cmd))
@@ -321,6 +391,21 @@ class SlideshowVideoComposeAgent:
             if p.returncode != 0:
                 logger.error("[VideoCompose] %s failed rc=%s stderr_tail=%s", desc, p.returncode, p.stderr[-1000:])
                 raise RuntimeError(f"{desc} failed")
+
+        def ffmpeg_has_filter_LOCAL_SHADOW(bin_path: str, name: str) -> bool:
+            try:
+                pr = subprocess.run([bin_path, "-hide_banner", "-filters"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if pr.returncode != 0:
+                    return False
+                out = pr.stdout or ""
+                name_l = name.strip().lower()
+                for line in out.splitlines():
+                    if name_l in line.lower().split():
+                        if name_l in line.lower():
+                            return True
+                return False
+            except Exception:
+                return False
 
         def ffprobe_dur(p: Path) -> float:
             pr = subprocess.run([ffprobe_bin,"-v","error","-show_entries","format=duration","-of","default=nw=1:nk=1",str(p)],
@@ -393,21 +478,110 @@ class SlideshowVideoComposeAgent:
                     for ap in page_audios: f.write(f"file '{ap.as_posix()}'\n")
                 merged = Path(temp_dir)/f"merged_{page}.wav"
                 run_ffmpeg([ffmpeg_bin, "-y","-f","concat","-safe","0","-i",str(list_file),"-c:a","pcm_s16le",str(merged)], f"concat_audio_page{page}")
-                vf = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height+area_height}:(ow-iw)/2:0:black"
+                # Build per-page video filter
+                total_h = height + area_height
+                frames = max(1, int(round(fps * max(0.01, t))))
+                if enable_kb:
+                    # ratio expression across frames [0..1]
+                    if frames > 1:
+                        ratio_expr = f"on/{frames-1}"
+                        z_expr = f"{kb_zoom_start}+({kb_zoom_end - kb_zoom_start})*({ratio_expr})"
+                    else:
+                        ratio_expr = "0"
+                        z_expr = f"{kb_zoom_end}"
+                    # directional pan
+                    if kb_direction in ("lr", "left-right"):
+                        x_expr = f"(iw - iw/zoom)*({ratio_expr})"; y_expr = "(ih - ih/zoom)/2"
+                    elif kb_direction in ("rl", "right-left"):
+                        x_expr = f"(iw - iw/zoom)*(1-({ratio_expr}))"; y_expr = "(ih - ih/zoom)/2"
+                    elif kb_direction in ("tb", "top-bottom"):
+                        x_expr = "(iw - iw/zoom)/2"; y_expr = f"(ih - ih/zoom)*({ratio_expr})"
+                    elif kb_direction in ("bt", "bottom-top"):
+                        x_expr = "(iw - iw/zoom)/2"; y_expr = f"(ih - ih/zoom)*(1-({ratio_expr}))"
+                    else:  # center
+                        x_expr = "(iw - iw/zoom)/2"; y_expr = "(ih - ih/zoom)/2"
+                    vf_core = (
+                        f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d={frames}:s={width}x{height},fps={fps},setsar=1"
+                    )
+                else:
+                    vf_core = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,fps={fps},setsar=1"
+                vf = f"{vf_core},pad={width}:{total_h}:(ow-iw)/2:0:black"
                 if enable_captions:
                     if fontsdir:
                         vf += f",subtitles={ass.as_posix()}:fontsdir={fontsdir.as_posix()}"
                     else:
                         vf += f",subtitles={ass.as_posix()}"
+                # Add fade in/out if enabled and duration is sufficient
+                if enable_fade and t > 0.05:
+                    # Determine fade application mode
+                    is_first = (idx == 0)
+                    is_last = (idx == len(images) - 1)
+                    apply_in = (fade_mode in ("all", "in_only")) or (fade_mode in ("first_last", "ends") and is_first)
+                    apply_out = (fade_mode in ("all", "out_only")) or (fade_mode in ("first_last", "ends") and is_last)
+                    # Compute safe durations
+                    fi = max(0.0, min(float(fade_in), max(0.0, t - 0.01))) if apply_in else 0.0
+                    # Reserve head fade if applied, ensure we don't exceed t
+                    max_out = max(0.0, t - fi - 0.01)
+                    fo = max(0.0, min(float(fade_out), max_out)) if apply_out else 0.0
+                    if fi > 0.0:
+                        vf += f",fade=t=in:st=0:d={fi:.3f}"
+                    if fo > 0.0:
+                        st_out = max(0.0, t - fo)
+                        vf += f",fade=t=out:st={st_out:.3f}:d={fo:.3f}"
                 page_mp4 = Path(temp_dir)/f"page_{page}.mp4"
                 run_ffmpeg([ffmpeg_bin, "-y","-loop","1","-i",str(img),"-i",str(merged),"-vf",vf,
-                            "-c:v","libx264","-tune","stillimage","-pix_fmt","yuv420p","-r",str(fps),
+                            "-c:v","libx264","-pix_fmt","yuv420p",
                             "-c:a","aac","-shortest",str(page_mp4)], f"make_page_video_{page}")
                 page_videos.append(page_mp4)
-            concat_list = Path(temp_dir)/"list.txt"
-            with open(concat_list,'w',encoding='utf-8') as f:
-                for p in page_videos: f.write(f"file '{p.as_posix()}'\n")
-            run_ffmpeg([ffmpeg_bin,"-y","-f","concat","-safe","0","-i",str(concat_list),"-c","copy",str(output)], "concat_pages")
+            # Crossfade between pages if enabled; otherwise fast concat
+            if enable_crossfade and crossfade > 0 and len(page_videos) > 1:
+                if not ffmpeg_has_filter(ffmpeg_bin, "xfade"):
+                    logger.warning("[VideoCompose] ffmpeg has no 'xfade' filter; falling back to concat without crossfade")
+                    enable_crossfade = False
+                else:
+                    # Probe durations for offsets
+                    durs_pages = [ffprobe_dur(p) for p in page_videos]
+                    # Prepare inputs
+                    inputs = []
+                    for p in page_videos:
+                        inputs += ["-i", str(p)]
+                    # Build filter graph
+                    filter_parts = []
+                    ar = int(cfg_params.get("audio_sample_rate", 44100))
+                    for i in range(len(page_videos)):
+                        filter_parts.append(f"[{i}:v]format=yuv420p,setsar=1[v{i}]")
+                        filter_parts.append(f"[{i}:a]aresample={ar},aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]")
+                    cur_v = "v0"; cur_a = "a0"; cur_d = durs_pages[0]
+                    for i in range(1, len(page_videos)):
+                        off = max(0.0, cur_d - crossfade)
+                        out_v = f"vxf{i}"; out_a = f"axf{i}"
+                        # Video crossfade
+                        filter_parts.append(f"[{cur_v}][v{i}]xfade=transition=fade:duration={crossfade:.3f}:offset={off:.3f}[{out_v}]")
+                        # Audio handling: either acrossfade or hard cut (no overlap)
+                        if enable_audio_crossfade:
+                            filter_parts.append(f"[{cur_a}][a{i}]acrossfade=d={crossfade:.3f}[{out_a}]")
+                        else:
+                            # Trim current audio to 'off' (start of crossfade), then append next audio without overlap
+                            filter_parts.append(f"[{cur_a}]atrim=end={off:.3f},asetpts=PTS-STARTPTS[{out_a}p1]")
+                            filter_parts.append(f"[a{i}]asetpts=PTS-STARTPTS[{out_a}p2]")
+                            filter_parts.append(f"[{out_a}p1][{out_a}p2]concat=n=2:v=0:a=1[{out_a}]")
+                        cur_v = out_v; cur_a = out_a; cur_d = cur_d + durs_pages[i] - crossfade
+                    filter_complex = ",".join(filter_parts)
+                    xfade_out = Path(temp_dir) / "xfaded.mp4"
+                    run_ffmpeg([
+                        ffmpeg_bin, "-y", *inputs,
+                        "-filter_complex", filter_complex,
+                        "-map", f"[{cur_v}]", "-map", f"[{cur_a}]",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        "-c:a", cfg_params.get("audio_codec", "aac"),
+                        str(xfade_out)
+                    ], "xfade_pages")
+                    shutil.move(xfade_out, output)
+            if not enable_crossfade:
+                concat_list = Path(temp_dir)/"list.txt"
+                with open(concat_list,'w',encoding='utf-8') as f:
+                    for p in page_videos: f.write(f"file '{p.as_posix()}'\n")
+                run_ffmpeg([ffmpeg_bin,"-y","-f","concat","-safe","0","-i",str(concat_list),"-c","copy",str(output)], "concat_pages")
 
             # Optional background music mixing
             bgm_path = params.get("bgm_path")
