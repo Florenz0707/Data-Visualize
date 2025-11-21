@@ -3,6 +3,7 @@ import mimetypes
 import shutil
 from pathlib import Path
 from typing import List
+import logging
 
 import aiofiles
 from django.conf import settings
@@ -25,6 +26,7 @@ from .schemas import (
 )
 
 api = NinjaAPI(title="MM-StoryAgent Backend")
+logger = logging.getLogger("django")
 
 
 # --- Helpers for redo semantics ---
@@ -97,30 +99,53 @@ def _prepare_redo(task: Task, start_segment: int) -> None:
 def download_resource(request: HttpRequest, url: str):
     user = auth_from_header(request.headers.get("Authorization"))
     if not user:
+        logger.warning("/api/resource unauthorized: missing/invalid token")
         raise HttpError(401, "Unauthorized")
 
     try:
         rel = Path(url)
     except Exception:
+        logger.warning("/api/resource invalid url param: %r", url)
         raise HttpError(400, "Invalid url")
     if rel.is_absolute() or ".." in rel.parts:
+        logger.warning("/api/resource rejected absolute or traversal url: %r parts=%s", url, rel.parts)
         raise HttpError(400, "Invalid url")
 
+    # Compute base/abs for potential fallbacks
+    base_dir = Path(settings.BASE_DIR).resolve()
+    abs_path = (base_dir / rel).resolve()
+
+    # DB lookup (exact relative first)
     res_qs = Resource.objects.filter(path=str(rel), task__user=user)
     if not res_qs.exists():
-        raise HttpError(404, "Resource not found")
+        # Try absolute path variant (for legacy rows that stored abs paths)
+        abs_qs = Resource.objects.filter(path=str(abs_path), task__user=user)
+        if abs_qs.exists():
+            res_qs = abs_qs
+        else:
+            # As a last resort, try suffix match under same user
+            suffix_qs = Resource.objects.filter(path__endswith=str(rel), task__user=user)
+            if suffix_qs.exists():
+                res_qs = suffix_qs
+            else:
+                # Extra diagnostics: try to locate nearby matches for same user task
+                similar = list(Resource.objects.filter(path__icontains=rel.name, task__user=user).values_list("path", flat=True)[:5])
+                logger.warning("/api/resource not found in DB: user=%s url=%s similar_candidates=%s", user.id, str(rel), similar)
+                raise HttpError(404, "Resource not found")
+
     res = res_qs.select_related("task").order_by("-id").first()
     task = res.task
 
     story_dir = Path(task.story_dir).resolve()
-    base_dir = Path(settings.BASE_DIR).resolve()
-    abs_path = (base_dir / rel).resolve()
 
+    # Filesystem & containment check
     try:
         if not abs_path.is_file() or not abs_path.is_relative_to(story_dir):
+            logger.warning("/api/resource file missing or outside story_dir: file=%s story_dir=%s exists=%s", abs_path, story_dir, abs_path.exists())
             raise ValueError
     except AttributeError:
         if not abs_path.is_file() or str(abs_path).find(str(story_dir)) != 0:
+            logger.warning("/api/resource forbidden path: file=%s story_dir=%s exists=%s", abs_path, story_dir, abs_path.exists())
             raise HttpError(403, "Forbidden")
 
     async def _iter_file_async(path: Path, chunk_size: int = 8192):
@@ -134,6 +159,7 @@ def download_resource(request: HttpRequest, url: str):
     mime, _ = mimetypes.guess_type(str(abs_path))
     resp = StreamingHttpResponse(_iter_file_async(abs_path), content_type=mime or "application/octet-stream")
     resp["Content-Disposition"] = f'attachment; filename="{abs_path.name}"'
+    logger.info("/api/resource success: user=%s task=%s url=%s file=%s", user.id, task.id, str(rel), str(abs_path))
     return resp
 
 
