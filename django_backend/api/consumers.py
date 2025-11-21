@@ -5,6 +5,7 @@ import json
 from typing import Optional
 
 from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
 from django.conf import settings
 
 from .auth import verify_access_token
@@ -47,7 +48,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             await self.close(code=1011)
             return
         token = _get_token_from_scope(self.scope)
-        user = verify_access_token(token) if token else None
+        user = await database_sync_to_async(verify_access_token)(token) if token else None
         if not user:
             await self.close(code=4401)  # Unauthorized
             return
