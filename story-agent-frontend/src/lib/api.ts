@@ -1,5 +1,4 @@
 import axios from 'axios';
-// 修复：添加缺失的类型导入
 import type { WorkflowStep, TaskProgress, ResourceResponse } from '../types';
 
 const API_BASE_URL = '/api';
@@ -25,17 +24,24 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    
+    const isLoginRequest = originalRequest.url?.includes('/login');
+
+    if (error.response?.status === 401 && !originalRequest._retry && !isLoginRequest) {
       originalRequest._retry = true;
       try {
         const { data } = await axios.post(`${API_BASE_URL}/refresh`);
+        
         localStorage.setItem('access_token', data.access_token);
         api.defaults.headers.common.Authorization = `Bearer ${data.access_token}`;
         originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
+        
         return api(originalRequest);
       } catch (refreshError) {
         localStorage.removeItem('access_token');
-        window.location.href = '/login';
+        if (!window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
         return Promise.reject(refreshError);
       }
     }

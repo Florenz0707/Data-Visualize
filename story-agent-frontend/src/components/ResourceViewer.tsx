@@ -7,61 +7,75 @@ interface Props {
   urls: string[];
 }
 
-// 安全图片组件：通过 Blob 加载带 Token 的图片
 const SecureImage: React.FC<{ src: string }> = ({ src }) => {
   const [objectUrl, setObjectUrl] = useState<string>('');
 
   useEffect(() => {
-    // 如果是完整URL且不是本域，可能不需要Auth，这里假设资源都需要通过 API 代理或鉴权
-    // 或者后端返回的是相对路径
+    let active = true;
+    let currentUrl = '';
+
     const fetchImage = async () => {
       try {
         const response = await api.get(src, { responseType: 'blob' });
-        const url = URL.createObjectURL(response.data);
-        setObjectUrl(url);
+        if (active) {
+          const url = URL.createObjectURL(response.data);
+          currentUrl = url;
+          setObjectUrl(url);
+        }
       } catch (e) {
         console.error("Image load failed", e);
       }
     };
+    
     fetchImage();
+
     return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      active = false;
+      if (currentUrl) {
+        URL.revokeObjectURL(currentUrl);
+      }
     };
   }, [src]);
 
   if (!objectUrl) return <div className="w-full h-48 bg-gray-200 animate-pulse rounded"></div>;
-  return <img src={objectUrl} alt="Generated" className="max-w-full h-auto rounded shadow" />;
+  return <img src={objectUrl} alt="Generated" className="w-full h-auto rounded shadow hover:shadow-lg transition" />;
 };
 
-// 文本查看组件
-const TextViewer: React.FC<{ url: string }> = ({ url }) => {
-  const [content, setContent] = useState<string>('Loading text...');
-  
+const JsonViewer: React.FC<{ url: string; title: string }> = ({ url, title }) => {
+  const [content, setContent] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
-    api.get(url).then(res => {
-      // 假设后端返回的是 JSON 或 纯文本
-      setContent(typeof res.data === 'object' ? JSON.stringify(res.data, null, 2) : res.data);
-    });
+    setLoading(true);
+    api.get(url)
+      .then(res => setContent(res.data))
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, [url]);
 
+  if (loading) return <div className="p-4 text-gray-400">加载文本内容中...</div>;
+
   return (
-    <div className="bg-white p-4 rounded border overflow-auto max-h-[60vh] whitespace-pre-wrap font-serif leading-relaxed">
-      {content}
+    <div className="bg-white p-6 rounded-lg shadow border border-gray-100">
+      <h4 className="text-sm font-bold text-gray-400 uppercase mb-4">{title}</h4>
+      <div className="prose max-w-none whitespace-pre-wrap font-serif text-gray-800 leading-relaxed">
+        {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
+      </div>
     </div>
   );
 };
 
 const ResourceViewer: React.FC<Props> = ({ segmentId, urls }) => {
-  if (!urls || urls.length === 0) return <div className="text-gray-400">暂无资源生成</div>;
+  if (!urls || urls.length === 0) return <div className="text-gray-400 text-center py-10">暂无资源生成</div>;
 
   const type = SEGMENT_TYPE_MAP[segmentId];
 
-  if (type === 'text') {
-    return (
-      <div className="space-y-4">
-        {urls.map((url, i) => <TextViewer key={i} url={url} />)}
-      </div>
-    );
+  if (type === 'story_json') {
+    return <div className="space-y-4">{urls.map((url, i) => <JsonViewer key={i} url={url} title="生成故事 (JSON)" />)}</div>;
+  }
+
+  if (type === 'split_json') {
+    return <div className="space-y-4">{urls.map((url, i) => <JsonViewer key={i} url={url} title="分镜脚本 (JSON)" />)}</div>;
   }
 
   if (type === 'image') {
@@ -73,14 +87,14 @@ const ResourceViewer: React.FC<Props> = ({ segmentId, urls }) => {
   }
 
   if (type === 'audio') {
-    // 音频也可以用 Blob 方式，这里简化直接用 src，如果需要鉴权请参考 SecureImage 逻辑
     return (
       <div className="space-y-2">
         {urls.map((url, i) => (
-          <audio key={i} controls className="w-full">
-             {/* 注意：如果音频需要 Auth，不能直接这样写，需要类似 Image 的 Blob 处理 */}
-             <source src={`/api${url}`} /> 
-          </audio>
+          <div key={i} className="bg-white p-3 rounded shadow flex items-center">
+             <audio controls className="w-full h-10">
+                 <source src={`/api${url}`} />
+             </audio>
+          </div>
         ))}
       </div>
     );
@@ -90,7 +104,7 @@ const ResourceViewer: React.FC<Props> = ({ segmentId, urls }) => {
     return (
       <div className="space-y-4">
         {urls.map((url, i) => (
-          <video key={i} controls className="w-full rounded shadow-lg bg-black">
+          <video key={i} controls className="w-full rounded-lg shadow-xl bg-black aspect-video">
              <source src={`/api${url}`} />
           </video>
         ))}

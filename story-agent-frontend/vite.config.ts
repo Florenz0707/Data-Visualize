@@ -6,9 +6,13 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8000', // 假设你的后端运行在 8000
+        target: 'http://localhost:8000',
         changeOrigin: true,
-        // 如果后端路径没有 /api 前缀，需要 rewrite: (path) => path.replace(/^\/api/, '')
+      },
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true,
       }
     }
   }

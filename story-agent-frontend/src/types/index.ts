@@ -17,7 +17,6 @@ export interface WorkflowStep {
   name: string;
 }
 
-// 修复：将 enum 改为 const object + type
 export const TaskStatusEnum = {
   PENDING: 'pending',
   RUNNING: 'running',
@@ -39,10 +38,20 @@ export interface ResourceResponse {
   urls: string[];
 }
 
-export const SEGMENT_TYPE_MAP: Record<number, 'text' | 'image' | 'audio' | 'video'> = {
-  1: 'text',
-  2: 'image',
-  3: 'text',
-  4: 'audio',
-  5: 'video',
+// WebSocket 消息类型定义
+export interface WSMessage {
+  type: 'segment_finished' | 'segment_failed';
+  task_id: string;
+  segment_id: number;
+  status: TaskStatusEnum;
+  resources?: string[];
+  error?: string;
+}
+
+export const SEGMENT_TYPE_MAP: Record<number, 'story_json' | 'image' | 'split_json' | 'audio' | 'video'> = {
+  1: 'story_json', // Story (JSON)
+  2: 'image',      // Image
+  3: 'split_json', // Split (JSON)
+  4: 'audio',      // Speech
+  5: 'video',      // Video
 };
