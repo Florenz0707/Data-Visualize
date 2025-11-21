@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { taskApi } from '../lib/api';
 import type { WorkflowStep, TaskProgress } from '../types';
 import { TaskStatusEnum } from '../types';
@@ -9,6 +9,7 @@ import { useWebSocket } from '../context/WebSocketContext';
 const TaskWorkspace: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const { lastMessage, isConnected } = useWebSocket();
+  const location = useLocation();
   
   const [workflow, setWorkflow] = useState<WorkflowStep[]>([]);
   const [progress, setProgress] = useState<TaskProgress | null>(null);
@@ -17,6 +18,7 @@ const TaskWorkspace: React.FC = () => {
   const [resourceLoading, setResourceLoading] = useState(false);
   
   const timerRef = useRef<number | undefined>(undefined);
+  const autoStartRef = useRef(false);
 
   // 1. 初始化：加载工作流定义
   useEffect(() => {
@@ -72,12 +74,11 @@ const TaskWorkspace: React.FC = () => {
       .finally(() => setResourceLoading(false));
   }, [taskId]);
 
-  // 6. 自动切换资源逻辑：当用户查看的是已完成步骤时，加载资源
+  // 6. 自动切换资源逻辑
   useEffect(() => {
     if (!taskId || !viewingSegmentId) return;
     
     const completedSegId = progress ? parseInt(progress.current_segment || '0') : 0;
-    // 如果查看的是“已完成”的步骤（当前ID <= 已完成ID），则加载资源
     if (viewingSegmentId <= completedSegId) {
        loadResources(viewingSegmentId);
     } else {
@@ -85,26 +86,44 @@ const TaskWorkspace: React.FC = () => {
     }
   }, [taskId, viewingSegmentId, progress, loadResources]);
 
-  const handleExecute = async (redo: boolean = false) => {
-    if (!taskId || !viewingSegmentId) return;
+  // 抽象出执行函数
+  const executeStep = async (segId: number, redo: boolean = false) => {
+    if (!taskId) return;
     try {
-      await taskApi.execute(taskId, viewingSegmentId, redo);
+      await taskApi.execute(taskId, segId, redo);
       setProgress(prev => prev ? ({ ...prev, status: { status: TaskStatusEnum.RUNNING } }) : null);
     } catch (e) {
-      alert("执行请求失败");
+      console.error("执行失败", e);
+      alert("任务启动失败，请手动重试");
     }
   };
+
+  const handleExecuteClick = (redo: boolean = false) => {
+    if (viewingSegmentId) executeStep(viewingSegmentId, redo);
+  };
+
+  useEffect(() => {
+    const autoStart = location.state?.autoStart;
+    // 条件：需要自动执行 + 还没执行过 + 工作流已加载 + 进度已加载
+    if (autoStart && !autoStartRef.current && workflow.length > 0 && progress) {
+        const completedSegId = parseInt(progress.current_segment || '0');
+        // 只有当任务完全处于初始状态（完成阶段为0 且 状态为 PENDING）时才自动执行
+        if (completedSegId === 0 && progress.status.status === TaskStatusEnum.PENDING) {
+            console.log("Auto starting new task...");
+            autoStartRef.current = true;
+            const firstStepId = workflow[0].id;
+            setViewingSegmentId(firstStepId);
+            executeStep(firstStepId, false);
+        }
+    }
+  }, [location.state, workflow, progress]);
 
   if (!taskId) return <div>Invalid Task ID</div>;
 
   // current_segment 代表“已完成”的最新阶段
   const completedSegId = progress ? parseInt(progress.current_segment || '0') : 0;
   const taskStatus = progress?.status.status;
-
-  // 下一个待执行的阶段 = 已完成 + 1
   const nextStepId = completedSegId + 1;
-  
-  // 正在运行的阶段：如果是 RUNNING 状态，则认为正在跑的是 nextStepId
   const runningStepId = taskStatus === TaskStatusEnum.RUNNING ? nextStepId : null;
 
   return (
@@ -159,21 +178,17 @@ const TaskWorkspace: React.FC = () => {
           </h3>
           
           <div className="space-x-3">
-            {/* 场景1：显示“开始生成”
-               条件：当前查看的是“下一个待执行步骤” 且 任务不在运行中
-            */}
+            {/* 场景1：显示“开始生成” */}
             {viewingSegmentId === nextStepId && taskStatus !== TaskStatusEnum.RUNNING && (
               <button 
-                onClick={() => handleExecute(false)}
+                onClick={() => handleExecuteClick(false)}
                 className="bg-blue-600 text-white px-6 py-2 rounded-full shadow hover:bg-blue-700 active:scale-95 transition font-medium"
               >
                 开始生成
               </button>
             )}
             
-            {/* 场景2：显示“生成中”
-               条件：当前查看的是“正在运行的步骤”
-            */}
+            {/* 场景2：显示“生成中” */}
             {viewingSegmentId === runningStepId && (
               <button disabled className="bg-gray-100 text-gray-400 border border-gray-200 px-6 py-2 rounded-full cursor-not-allowed flex items-center gap-2">
                 <span className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></span>
@@ -181,12 +196,10 @@ const TaskWorkspace: React.FC = () => {
               </button>
             )}
 
-            {/* 场景3：显示“重新生成”
-               条件：当前查看的是“已完成步骤” 且 任务不在运行中
-            */}
+            {/* 场景3：显示“重新生成” */}
             {viewingSegmentId !== null && viewingSegmentId <= completedSegId && taskStatus !== TaskStatusEnum.RUNNING && (
               <button 
-                onClick={() => handleExecute(true)}
+                onClick={() => handleExecuteClick(true)}
                 className="text-orange-600 border border-orange-200 bg-orange-50 px-4 py-2 rounded-full hover:bg-orange-100 transition text-sm font-medium"
               >
                 重新生成此步骤

@@ -30,14 +30,14 @@ const Dashboard: React.FC = () => {
     try {
       const { data } = await taskApi.create({ topic: newTopic, main_role: role, scene });
       setShowModal(false);
-      navigate(`/task/${data.task_id}`);
+      navigate(`/task/${data.task_id}`, { state: { autoStart: true } });
     } catch (error) {
       alert('创建失败');
     }
   };
 
   const handleDelete = async (e: React.MouseEvent, taskId: string) => {
-    e.preventDefault();
+    e.preventDefault(); 
     if (!window.confirm('确定要删除这个任务吗？此操作不可恢复。')) return;
     
     try {
@@ -105,7 +105,7 @@ const Dashboard: React.FC = () => {
             <div className="space-y-3">
               <input 
                 className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" 
-                placeholder="主题 (必填)" 
+                placeholder="主题" 
                 value={newTopic} 
                 onChange={e => setNewTopic(e.target.value)} 
               />
