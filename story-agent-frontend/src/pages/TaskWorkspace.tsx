@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { taskApi } from '../lib/api';
 import type { WorkflowStep, TaskProgress } from '../types';
 import { TaskStatusEnum } from '../types';
@@ -9,6 +9,7 @@ import { useWebSocket } from '../context/WebSocketContext';
 const TaskWorkspace: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const { lastMessage, isConnected } = useWebSocket();
+  const location = useLocation();
   
   const [workflow, setWorkflow] = useState<WorkflowStep[]>([]);
   const [progress, setProgress] = useState<TaskProgress | null>(null);
@@ -17,7 +18,9 @@ const TaskWorkspace: React.FC = () => {
   const [resourceLoading, setResourceLoading] = useState(false);
   
   const timerRef = useRef<number | undefined>(undefined);
+  const autoStartRef = useRef(false);
 
+  // 1. 初始化：加载工作流定义
   useEffect(() => {
     taskApi.getWorkflow().then(res => {
       setWorkflow(res.data);
@@ -25,6 +28,7 @@ const TaskWorkspace: React.FC = () => {
     });
   }, []);
 
+  // 2. 获取任务进度的核心函数
   const fetchProgress = useCallback(async () => {
     if (!taskId) return;
     try {
@@ -33,32 +37,34 @@ const TaskWorkspace: React.FC = () => {
 
       if (data.status.status === TaskStatusEnum.RUNNING) {
         clearTimeout(timerRef.current);
-        timerRef.current = window.setTimeout(fetchProgress, 5000);
+        timerRef.current = window.setTimeout(fetchProgress, 3000);
       }
     } catch (e) {
       console.error("Fetch progress failed", e);
     }
   }, [taskId]);
 
+  // 3. 监听 WebSocket 消息
   useEffect(() => {
     if (!lastMessage || !taskId) return;
 
     if (lastMessage.task_id == taskId) {
       console.log("收到当前任务更新:", lastMessage);
-
       fetchProgress();
-
+      
       if (lastMessage.type === 'segment_finished' && lastMessage.segment_id === viewingSegmentId) {
         loadResources(viewingSegmentId);
       }
     }
   }, [lastMessage, taskId]);
 
+  // 4. 初始加载进度
   useEffect(() => {
     fetchProgress();
     return () => clearTimeout(timerRef.current);
   }, [fetchProgress]);
 
+  // 5. 加载资源逻辑
   const loadResources = useCallback((segId: number) => {
     if (!taskId) return;
     setResourceLoading(true);
@@ -68,32 +74,57 @@ const TaskWorkspace: React.FC = () => {
       .finally(() => setResourceLoading(false));
   }, [taskId]);
 
+  // 6. 自动切换资源逻辑
   useEffect(() => {
     if (!taskId || !viewingSegmentId) return;
     
-    const currentSegId = progress ? parseInt(progress.current_segment) : 0;
-    
-    if (viewingSegmentId < currentSegId || progress?.status.status === TaskStatusEnum.COMPLETED || (viewingSegmentId === currentSegId && progress?.status.status !== TaskStatusEnum.RUNNING)) {
+    const completedSegId = progress ? parseInt(progress.current_segment || '0') : 0;
+    if (viewingSegmentId <= completedSegId) {
        loadResources(viewingSegmentId);
     } else {
       setResources([]);
     }
   }, [taskId, viewingSegmentId, progress, loadResources]);
 
-  const handleExecute = async (redo: boolean = false) => {
-    if (!taskId || !viewingSegmentId) return;
+  // 抽象出执行函数
+  const executeStep = async (segId: number, redo: boolean = false) => {
+    if (!taskId) return;
     try {
-      await taskApi.execute(taskId, viewingSegmentId, redo);
+      await taskApi.execute(taskId, segId, redo);
       setProgress(prev => prev ? ({ ...prev, status: { status: TaskStatusEnum.RUNNING } }) : null);
     } catch (e) {
-      alert("执行请求失败");
+      console.error("执行失败", e);
+      alert("任务启动失败，请手动重试");
     }
   };
 
+  const handleExecuteClick = (redo: boolean = false) => {
+    if (viewingSegmentId) executeStep(viewingSegmentId, redo);
+  };
+
+  useEffect(() => {
+    const autoStart = location.state?.autoStart;
+    // 条件：需要自动执行 + 还没执行过 + 工作流已加载 + 进度已加载
+    if (autoStart && !autoStartRef.current && workflow.length > 0 && progress) {
+        const completedSegId = parseInt(progress.current_segment || '0');
+        // 只有当任务完全处于初始状态（完成阶段为0 且 状态为 PENDING）时才自动执行
+        if (completedSegId === 0 && progress.status.status === TaskStatusEnum.PENDING) {
+            console.log("Auto starting new task...");
+            autoStartRef.current = true;
+            const firstStepId = workflow[0].id;
+            setViewingSegmentId(firstStepId);
+            executeStep(firstStepId, false);
+        }
+    }
+  }, [location.state, workflow, progress]);
+
   if (!taskId) return <div>Invalid Task ID</div>;
 
-  const currentSegId = progress ? parseInt(progress.current_segment) : 0;
+  // current_segment 代表“已完成”的最新阶段
+  const completedSegId = progress ? parseInt(progress.current_segment || '0') : 0;
   const taskStatus = progress?.status.status;
+  const nextStepId = completedSegId + 1;
+  const runningStepId = taskStatus === TaskStatusEnum.RUNNING ? nextStepId : null;
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
@@ -111,7 +142,7 @@ const TaskWorkspace: React.FC = () => {
               taskStatus === 'completed' ? 'bg-green-50 border-green-200 text-green-700' : 
               taskStatus === 'failed' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-100 border-gray-200'
             }`}>
-              {taskStatus?.toUpperCase()}
+              {taskStatus?.toUpperCase() || 'UNKNOWN'}
             </div>
             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-400'}`} title={isConnected ? "WebSocket Connected" : "Disconnected"}></div>
           </div>
@@ -120,8 +151,8 @@ const TaskWorkspace: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {workflow.map(step => {
             const isActive = viewingSegmentId === step.id;
-            const isPast = step.id < currentSegId;
-            const isCurrent = step.id === currentSegId;
+            const isCompleted = step.id <= completedSegId;
+            const isRunning = step.id === runningStepId;
             
             return (
               <button
@@ -132,8 +163,8 @@ const TaskWorkspace: React.FC = () => {
                 }`}
               >
                 <span className="font-medium">{step.id}. {step.name}</span>
-                {isPast && <span className={isActive ? 'text-blue-200' : 'text-green-500'}>✓</span>}
-                {isCurrent && taskStatus === 'running' && <span className="animate-spin">⟳</span>}
+                {isCompleted && <span className={isActive ? 'text-blue-200' : 'text-green-500'}>✓</span>}
+                {isRunning && <span className="animate-spin">⟳</span>}
               </button>
             );
           })}
@@ -147,33 +178,33 @@ const TaskWorkspace: React.FC = () => {
           </h3>
           
           <div className="space-x-3">
-            {/* 当前步骤待执行 */}
-            {viewingSegmentId === currentSegId && taskStatus !== 'running' && taskStatus !== 'completed' && (
+            {/* 场景1：显示“开始生成” */}
+            {viewingSegmentId === nextStepId && taskStatus !== TaskStatusEnum.RUNNING && (
               <button 
-                onClick={() => handleExecute(false)}
+                onClick={() => handleExecuteClick(false)}
                 className="bg-blue-600 text-white px-6 py-2 rounded-full shadow hover:bg-blue-700 active:scale-95 transition font-medium"
               >
                 开始生成
               </button>
             )}
             
-            {/* 运行中 */}
-            {taskStatus === 'running' && viewingSegmentId === currentSegId && (
+            {/* 场景2：显示“生成中” */}
+            {viewingSegmentId === runningStepId && (
               <button disabled className="bg-gray-100 text-gray-400 border border-gray-200 px-6 py-2 rounded-full cursor-not-allowed flex items-center gap-2">
                 <span className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></span>
                 生成中...
               </button>
             )}
 
-            {/* 已完成步骤支持重做 */}
-            {(viewingSegmentId && viewingSegmentId < currentSegId) || taskStatus === 'completed' ? (
+            {/* 场景3：显示“重新生成” */}
+            {viewingSegmentId !== null && viewingSegmentId <= completedSegId && taskStatus !== TaskStatusEnum.RUNNING && (
               <button 
-                onClick={() => handleExecute(true)}
+                onClick={() => handleExecuteClick(true)}
                 className="text-orange-600 border border-orange-200 bg-orange-50 px-4 py-2 rounded-full hover:bg-orange-100 transition text-sm font-medium"
               >
                 重新生成此步骤
               </button>
-            ) : null}
+            )}
           </div>
         </header>
 
