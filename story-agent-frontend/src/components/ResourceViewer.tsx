@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { api, taskApi } from '../lib/api';
+import { taskApi } from '../lib/api';
 import { SEGMENT_TYPE_MAP, VIDEOGEN_SEGMENT_TYPE_MAP } from '../types';
 
 export type FetchFileFn = (url: string, type: 'blob' | 'json', onProgress?: (percent: number) => void) => Promise<any>;
