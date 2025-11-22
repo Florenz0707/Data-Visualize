@@ -146,6 +146,43 @@ Response 200
 { "deleted": true }
 ```
 
+
+### 3.8 User-provided resource upload (redo seg1/seg3)
+PUT /api/task/{task_id}/myresource/{segmentId} (auth)
+
+Notes
+- Only the default 5-step workflow; videogen is not supported
+- Only segmentId ∈ {1, 3}
+- Acts like a redo: writes user-provided content, resets and marks the segment completed, sets current_segment to the segment, and clears downstream artifacts
+
+Request formats
+- application/json
+  - seg1 (Story):
+    {
+      "pages": [ {"story":"page1"}, {"story":"page2"} ]
+    }
+    - strings are allowed and will be normalized to {"story": "..."}
+  - seg3 (Split):
+    {
+      "segmented_pages": [ ["s1","s2"], ["A","B","C"] ]
+    }
+    - segmented_pages length must match pages length in script_data.json
+
+- multipart/form-data (upload JSON file)
+  - file=@script_data.json
+  - mode=merge|replace (optional; default replace)
+    - seg1: replace overwrites pages; merge only replaces pages while preserving other fields (and clears old segmented_pages)
+    - seg3: always merges into script_data.json and updates segmented_pages
+
+Response (200)
+```json
+{ "segmentId": 1, "urls": ["generated_stories/<id>/script_data.json"], "message": "Resource updated and segment marked completed" }
+```
+
+Errors
+- 400: invalid segmentId (not 1/3), bad schema, length mismatch, unsupported Content-Type
+- 401: unauthorized; 403: forbidden; 404: task not found / missing prerequisites (seg3); 409: task running
+
 ---
 
 ## 4. Text-to-Video (Standalone Workflow: videogen)

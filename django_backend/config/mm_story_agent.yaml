@@ -16,7 +16,7 @@ story_writer:
         temperature: 0.5
         max_pages: 10  # 最大页面数（用于测试）
     params:
-        story_topic: "Magnet Mania - Introduction to magnets and how they work."
+        story_topic: "null"
         main_role: "(no role specified)"
         scene: "(no scene specified)"
 
@@ -24,10 +24,10 @@ story_writer:
 # ==================== 文本切分 ====================
 text_split:
     params:
-        max_chars: 100
+        max_chars: 80
         # Post-merge thresholds to avoid overly short segments
-        min_chars_per_segment: 15
-        min_words_per_segment: 3
+        min_chars_per_segment: 20
+        min_words_per_segment: 4
 
 # ==================== 语音合成 ====================
 speech_generation:
@@ -55,7 +55,7 @@ image_generation:
         width: &image_width 1280
     params:
         seed: 112536
-        style_name: "Japanese Anime"
+        style_name: "Storybook"
         # 可选风格: '(No style)', 'Japanese Anime', 'Digital/Oil Painting',
         # 'Pixar/Disney Character', 'Photographic', 'Comic book', 'Line art',
         # 'Black and White Film Noir', 'Isometric Rooms', 'Storybook'
@@ -84,28 +84,31 @@ video_compose:
         crossfade: 0.25
         enable_audio_crossfade: false # 关键：音频不做淡化/叠加
         # --- New effects (enabled by default; tune values as needed) ---
-        enable_fade: true
+        enable_fade: false
         fade_mode: ends  # all|in_only|out_only|first_last(=ends)|none
         fade_in: 0.2
         fade_out: 0.25
 
         enable_ken_burns: true
-        kb_zoom_start: 0.8
-        kb_zoom_end: 1.1
-        kb_direction: center  # lr|rl|tb|bt|center
+        kb_zoom_start: 1.0
+        kb_zoom_end: 1.0
+        kb_direction: lr  # lr|rl|tb|bt|center
         # --- End effects ---
         fps: 24
         audio_sample_rate: 44100
         audio_codec: aac
+        use_global_captions: true
+        burn_in_captions: true
+        export_srt_on_burn: false
         caption:
+            enable_captions: true  # 启用字幕（默认）
             font: resource/font/FiraCode-Regular.ttf
             # bg_color: LightGrey
-            fontsize: 24
+            fontsize: 18
             color: white
             # stroke_color: white
             # stroke_width: 0.5
             workers: 4  # 并行字幕渲染线程数
-            enable_captions: true  # 启用字幕（默认）
         bgm_path: "resource/bgm/Summer.flac"
         bgm_volume: 0.25  # Optional volume multiplier (0-1). Default 0.25 when mixing
 

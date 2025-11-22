@@ -32,6 +32,7 @@ class TaskNewIn(BaseModel):
     topic: str  # For videogen, this serves as the prompt
     main_role: Optional[str] = ""
     scene: Optional[str] = ""
+    description: Optional[str] = ""
     workflow_version: Optional[str] = "default"  # "default" or "videogen"
 
 

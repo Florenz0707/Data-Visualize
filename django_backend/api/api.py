@@ -234,10 +234,14 @@ def task_new(request: HttpRequest, payload: TaskNewIn):
     )
     task.ensure_story_dir()
     if wf_ver == "videogen":
-        TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+        desc = (payload.description or "") if hasattr(payload, "description") else ""
+        meta = {"description": desc} if desc else {}
+        TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending", metadata_json=meta)
     else:
+        desc = (payload.description or "") if hasattr(payload, "description") else ""
         for segment in WorkflowDefinition.get_active_segments():
-            TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending")
+            meta = {"description": desc} if segment["id"] == 1 and desc else {}
+            TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending", metadata_json=meta)
     return TaskNewOut(task_id=task.id)
 
 
@@ -356,12 +360,14 @@ def videogen_new(request: HttpRequest, payload: TaskNewIn):
         workflow_version="videogen",
     )
     task.ensure_story_dir()
-    TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+    desc = (payload.description or "") if hasattr(payload, "description") else ""
+    meta = {"description": desc} if desc else {}
+    TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending", metadata_json=meta)
     return TaskNewOut(task_id=task.id)
 
 
 @api.post("/videogen/{task_id}/execute", response={200: ExecuteOut})
-def videogen_execute(request: HttpRequest, task_id: int, payload: Optional[T2VExecuteIn] = None, redo: bool = False):
+def videogen_execute(request: HttpRequest, task_id: int, redo: bool = False):
     from django.utils import timezone
     user = require_user(request)
     task = Task.objects.filter(id=task_id, user=user).first()
@@ -386,13 +392,6 @@ def videogen_execute(request: HttpRequest, task_id: int, payload: Optional[T2VEx
     if not seg:
         raise HttpError(400, "Unknown segment")
 
-    # Merge overrides into metadata_json for the worker to pick up
-    if payload is not None:
-        meta = seg.metadata_json or {}
-        for k, v in payload.model_dump(exclude_none=True).items():
-            meta[k] = v
-        seg.metadata_json = meta
-
     if seg.status == "running":
         async_id = None
     else:
@@ -400,7 +399,7 @@ def videogen_execute(request: HttpRequest, task_id: int, payload: Optional[T2VEx
         if not seg.started_at:
             seg.started_at = timezone.now()
         seg.error_message = ""
-        seg.save(update_fields=["status", "started_at", "error_message", "metadata_json"])
+        seg.save(update_fields=["status", "started_at", "error_message"])
         if task.status in ("pending", "failed"):
             task.status = "running"
             task.save(update_fields=["status"])
@@ -421,3 +420,152 @@ def delete_task(request: HttpRequest, task_id: int):
     task.purge_files()
     task.delete()
     return {"deleted": True}
+
+
+# --- New: user-provided resource upload (seg1, seg3) ---
+@api.put("/task/{task_id}/myresource/{segmentId}")
+def upload_myresource(request: HttpRequest, task_id: int, segmentId: int):
+    from django.utils import timezone
+    from .tasks import _publish_notify
+
+    user = require_user(request)
+    task = Task.objects.filter(id=task_id, user=user).first()
+    if not task:
+        raise HttpError(404, "Task not found")
+
+    if (task.workflow_version or "default").lower() != "default":
+        raise HttpError(400, "Only default workflow supports this endpoint")
+
+    if segmentId not in (1, 3):
+        raise HttpError(400, "Only segment 1 (Story) and segment 3 (Split) are supported")
+
+    # Block if running
+    if task.segments.filter(status="running").exists():
+        raise HttpError(409, "Task is running, retry later")
+
+    story_dir = Path(task.ensure_story_dir())
+    script_path = story_dir / "script_data.json"
+
+    # Parse body: JSON or multipart with file
+    content_type = request.headers.get("Content-Type", "")
+    payload_data = None
+    mode = "replace"
+    try:
+        if content_type.startswith("application/json"):
+            raw = request.body.decode("utf-8") if request.body else "{}"
+            payload_data = json.loads(raw or "{}")
+        elif content_type.startswith("multipart/form-data"):
+            # Django request.POST/FILES available
+            if request.FILES:
+                up = request.FILES.get("file")
+                if not up:
+                    raise HttpError(400, "Missing 'file' in form-data")
+                raw = up.read().decode("utf-8")
+                payload_data = json.loads(raw)
+            mode = (request.POST.get("mode") or "replace").strip().lower()
+        else:
+            raise HttpError(400, "Unsupported Content-Type; use application/json or multipart/form-data")
+    except HttpError:
+        raise
+    except Exception as e:
+        raise HttpError(400, f"Invalid payload: {e}")
+
+    # Validate and write
+    def _write_json_atomic(path: Path, data: dict):
+        tmp = path.with_suffix(".tmp.json")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+        tmp.replace(path)
+
+    if segmentId == 1:
+        # Expect pages
+        pages = payload_data.get("pages") if isinstance(payload_data, dict) else None
+        if not isinstance(pages, list) or not pages:
+            raise HttpError(400, "For segment 1, payload must include non-empty 'pages' array")
+        norm_pages = []
+        try:
+            for i, it in enumerate(pages):
+                if isinstance(it, dict) and isinstance(it.get("story"), str):
+                    norm_pages.append({"story": it["story"]})
+                elif isinstance(it, str):
+                    norm_pages.append({"story": it})
+                else:
+                    raise ValueError(f"pages[{i}] must be object with 'story' or a string")
+        except Exception as e:
+            raise HttpError(400, f"Invalid pages: {e}")
+
+        if mode == "merge" and script_path.exists():
+            try:
+                base = json.loads(script_path.read_text(encoding="utf-8"))
+                if not isinstance(base, dict):
+                    base = {}
+            except Exception:
+                base = {}
+            base["pages"] = norm_pages
+            base.pop("segmented_pages", None)  # invalidate old splits
+            _write_json_atomic(script_path, base)
+        else:
+            _write_json_atomic(script_path, {"pages": norm_pages})
+
+    elif segmentId == 3:
+        # Expect segmented_pages and existing script_data.json with pages
+        if not script_path.exists():
+            raise HttpError(409, "script_data.json not found; run/upload segment 1 first")
+        try:
+            base = json.loads(script_path.read_text(encoding="utf-8"))
+            if not isinstance(base, dict):
+                raise ValueError("script_data.json must be a JSON object")
+            pages = base.get("pages")
+            if not isinstance(pages, list) or not pages:
+                raise ValueError("script_data.json pages missing or empty")
+        except Exception as e:
+            raise HttpError(409, f"Invalid script_data.json: {e}")
+
+        seg_pages = payload_data.get("segmented_pages") if isinstance(payload_data, dict) else None
+        if not isinstance(seg_pages, list):
+            raise HttpError(400, "For segment 3, payload must include 'segmented_pages' array")
+        if len(seg_pages) != len(pages):
+            raise HttpError(400, "Length of segmented_pages must match pages")
+        # basic validate each page segments
+        for idx, arr in enumerate(seg_pages):
+            if not isinstance(arr, list) or any(not isinstance(x, str) or not x.strip() for x in arr):
+                raise HttpError(400, f"segmented_pages[{idx}] must be non-empty strings array")
+        base["segmented_pages"] = [[s.strip() for s in arr if isinstance(s, str) and s.strip()] for arr in seg_pages]
+        _write_json_atomic(script_path, base)
+
+    # Redo from segmentId
+    _prepare_redo(task, segmentId)
+
+    # Mark current segment done & record resource
+    base_dir = Path(settings.BASE_DIR).resolve()
+    rel_path = (script_path.resolve().relative_to(base_dir)).as_posix()
+
+    with transaction.atomic():
+        task = Task.objects.select_for_update().get(id=task_id)
+        seg = TaskSegment.objects.select_for_update().get(task=task, segment_id=segmentId)
+        # resource
+        Resource.objects.create(task=task, segment_id=segmentId, type="json", path=rel_path)
+        # segment status
+        seg.status = "completed"
+        from django.utils import timezone
+        seg.started_at = seg.started_at or timezone.now()
+        seg.ended_at = timezone.now()
+        seg.error_message = ""
+        seg.save(update_fields=["status", "started_at", "ended_at", "error_message"])
+        # task progress
+        task.current_segment = segmentId
+        task.status = "running"
+        task.save(update_fields=["current_segment", "status"])
+
+    # notify
+    try:
+        _publish_notify(user_id=task.user_id, payload={
+            "type": "segment_finished",
+            "task_id": task.id,
+            "segment_id": segmentId,
+            "status": "completed",
+            "resources": [rel_path],
+        })
+    except Exception:
+        pass
+
+    return {"segmentId": int(segmentId), "urls": [rel_path], "message": "Resource updated and segment marked completed"}
