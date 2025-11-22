@@ -62,3 +62,50 @@ music_models:
 
 # ==================== 音效模型 ====================
 sound_models:
+
+# ==================== 视频生成模型 ====================
+video_models:
+  runway_gen3:
+    provider: runway
+    model_name: gen3
+    api_key_env: RUNWAYML_API_SECRET
+    api_base: "https://api.runwayml.com/v1"
+    default_params:
+      # sensible defaults; the agent can override via params
+      width: 1280
+      height: 720
+      fps: 24
+      duration: 4
+
+  runway_gen4_turbo:
+    provider: runway
+    model_name: gen4_turbo
+    api_key_env: RUNWAYML_API_SECRET
+    api_base: "https://api.runwayml.com/v1"
+    default_params:
+      width: 1280
+      height: 720
+      fps: 24
+      duration: 4
+
+  runway_veo3:
+    provider: runway
+    model_name: veo3
+    api_key_env: RUNWAYML_API_SECRET
+    api_base: "https://api.runwayml.com/v1"
+    default_params:
+      width: 1920
+      height: 1080
+      fps: 24
+      duration: 8
+
+  runway_veo3.1:
+    provider: runway
+    model_name: veo3.1
+    api_key_env: RUNWAYML_API_SECRET
+    api_base: "https://api.runwayml.com/v1"
+    default_params:
+      width: 1920
+      height: 1080
+      fps: 24
+      duration: 4

@@ -97,6 +97,32 @@
   - 作用：删除任务并清理生成文件
   - 响应：{ "deleted": true }
 
+### 独立：文本转视频（videogen）
+- 该工作流与默认 5 段流程独立，直接从长文本或图片生成视频（单段）。
+- 两种入口：
+  1) 便捷入口：
+     - POST /api/videogen/new（鉴权）
+       - 请求：{ "topic": "作为 prompt 的长文本描述", "main_role"?: "string", "scene"?: "string" }
+       - 响应：{ "task_id": number }
+     - POST /api/videogen/{task_id}/execute（鉴权）
+       - 请求（可选覆盖参数）：
+         {
+           "prompt": "覆盖 topic 的文本提示",
+           "model": "gen4_turbo",
+           "ratio": "1280:720",
+           "prompt_image_path": "./example.png",
+           "prompt_image_data_uri": "data:image/png;base64,...",
+           "width": 1280, "height": 720, "fps": 24, "duration": 5,
+           "use_mock": false
+         }
+       - 说明：传入 prompt_image_* 时走图生视频（image_to_video），否则文本生视频（text_to_video）。返回 202。
+  2) 通用入口：
+     - POST /api/task/new，传 { "topic": "...", "workflow_version": "videogen" }
+     - 然后 POST /api/task/{task_id}/execute/1
+- 资源获取：
+  - GET /api/task/{task_id}/resource?segmentId=1（鉴权）
+  - GET /api/resource?url=<相对路径>（鉴权）
+
 ---
 
 ## 段含义与返回资源

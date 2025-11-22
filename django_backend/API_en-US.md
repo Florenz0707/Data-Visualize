@@ -148,12 +148,73 @@ Response 200
 
 ---
 
-## 4. Notifications (optional)
+## 4. Text-to-Video (Standalone Workflow: videogen)
+
+Overview
+- Independent from the default 5-step workflow. Single-step video generation from long text or an input image.
+- Two entry styles:
+  1) Convenience: /api/videogen/new and /api/videogen/{task_id}/execute
+  2) Generic: /api/task/new with workflow_version="videogen"; then /api/task/{task_id}/execute/1
+
+### 4.1 Create videogen task
+POST /api/videogen/new (auth)
+
+Request
+```json
+{ "topic": "Prompt text for direct video generation", "main_role": "optional", "scene": "optional" }
+```
+Response 200
+```json
+{ "task_id": 123 }
+```
+
+Note: topic is used as the prompt.
+
+### 4.2 Execute videogen
+POST /api/videogen/{task_id}/execute (auth)
+
+Request body (all optional, for overriding defaults)
+```json
+{
+  "prompt": "Overrides topic",
+  "model": "gen4_turbo",
+  "ratio": "1280:720",
+  "prompt_image_path": "./example.png",
+  "prompt_image_data_uri": "data:image/png;base64,...",
+  "width": 1280,
+  "height": 720,
+  "fps": 24,
+  "duration": 5,
+  "use_mock": false
+}
+```
+Behavior
+- If prompt_image_path or prompt_image_data_uri is provided, the system runs image_to_video. Otherwise, text_to_video.
+- use_mock=true generates a local placeholder mp4 for offline testing; set to false in production.
+- Asynchronous execution, returns 202:
+```json
+{ "accepted": true, "celery_task_id": "string|null", "message": "Execution queued" }
+```
+
+### 4.3 Fetch resources
+- List: GET /api/task/{task_id}/resource?segmentId=1 (auth)
+- Download: GET /api/resource?url=<relative_path> (auth)
+
+### 4.4 Generic entry to videogen (optional)
+POST /api/task/new (auth)
+```json
+{ "topic": "string", "workflow_version": "videogen" }
+```
+Then execute: POST /api/task/{task_id}/execute/1
+
+---
+
+## 5. Notifications (optional)
 - The system may broadcast per-segment completion/failure via WebSocket/Redis PubSub (implementation detail). Clients can poll /progress and /task/{id}/resource alternatively.
 
 ---
 
-## 5. Examples
+## 6. Examples
 
 ```bash
 ACCESS=<token>

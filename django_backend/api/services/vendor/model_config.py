@@ -24,6 +24,7 @@ class ModelConfig:
         self.models['speech'] = config.get('speech_models') or {}
         self.models['music'] = config.get('music_models') or {}
         self.models['sound'] = config.get('sound_models') or {}
+        self.models['video'] = config.get('video_models') or {}
 
     def get_model_config(self, model_type: str, model_name: str) -> Dict[str, Any]:
         if model_type not in self.models:

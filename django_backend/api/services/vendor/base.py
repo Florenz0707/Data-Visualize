@@ -7,6 +7,7 @@ register_map = {
     'cosyvoice_tts': 'CosyVoiceAgent',  # placeholder if needed
     'audioldm2_t2a': 'AudioLDM2Agent',  # placeholder if needed
     'slideshow_video_compose': 'video_compose_agent',
+    'runway_t2v': 'video_t2v_runway',
     'freesound_sfx_retrieval': 'FreesoundSfxAgent',  # placeholder if needed
     'freesound_music_retrieval': 'FreesoundMusicAgent',  # placeholder if needed
     'speech_generation': 'modality_agents.speech_agent',

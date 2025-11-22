@@ -13,6 +13,7 @@ from django.db import transaction
 from django.http import HttpRequest, StreamingHttpResponse
 from ninja import NinjaAPI
 from ninja.errors import HttpError
+from typing import Optional
 
 from .auth import (
     create_access_token, create_refresh_token,
@@ -22,7 +23,7 @@ from .models import Task, TaskSegment, Resource, WorkflowDefinition
 from .schemas import (
     RegisterIn, RegisterOut, LoginIn, LoginOut,
     WorkflowItem, TaskNewIn, TaskNewOut, TaskProgressOut,
-    TaskListOut, ExecuteOut,
+    TaskListOut, ExecuteOut, T2VExecuteIn,
 )
 
 api = NinjaAPI(title="MM-StoryAgent Backend")
@@ -221,6 +222,7 @@ def require_user(request: HttpRequest) -> User:
 @api.post("/task/new", response={200: TaskNewOut})
 def task_new(request: HttpRequest, payload: TaskNewIn):
     user = require_user(request)
+    wf_ver = (payload.workflow_version or "default").strip().lower()
     task = Task.objects.create(
         user=user,
         topic=payload.topic,
@@ -228,10 +230,14 @@ def task_new(request: HttpRequest, payload: TaskNewIn):
         scene=payload.scene or "",
         status="pending",
         current_segment=0,
+        workflow_version=wf_ver or "default",
     )
     task.ensure_story_dir()
-    for segment in WorkflowDefinition.get_active_segments():
-        TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending")
+    if wf_ver == "videogen":
+        TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+    else:
+        for segment in WorkflowDefinition.get_active_segments():
+            TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending")
     return TaskNewOut(task_id=task.id)
 
 
@@ -325,6 +331,76 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int, redo: bo
             seg.started_at = timezone.now()
         seg.error_message = ""
         seg.save(update_fields=["status", "started_at", "error_message"])
+        if task.status in ("pending", "failed"):
+            task.status = "running"
+            task.save(update_fields=["status"])
+        from .tasks import execute_task_segment
+        async_res = execute_task_segment.delay(task.id, segmentId)
+        async_id = async_res.id
+
+    data = ExecuteOut(accepted=True, celery_task_id=async_id, message="Execution queued")
+    return api.create_response(request, data.model_dump(), status=202)
+
+
+# --- Convenience endpoints for direct T2V (videogen) workflow ---
+@api.post("/videogen/new", response={200: TaskNewOut})
+def videogen_new(request: HttpRequest, payload: TaskNewIn):
+    user = require_user(request)
+    task = Task.objects.create(
+        user=user,
+        topic=payload.topic,  # used as prompt
+        main_role=payload.main_role or "",
+        scene=payload.scene or "",
+        status="pending",
+        current_segment=0,
+        workflow_version="videogen",
+    )
+    task.ensure_story_dir()
+    TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+    return TaskNewOut(task_id=task.id)
+
+
+@api.post("/videogen/{task_id}/execute", response={200: ExecuteOut})
+def videogen_execute(request: HttpRequest, task_id: int, payload: Optional[T2VExecuteIn] = None, redo: bool = False):
+    from django.utils import timezone
+    user = require_user(request)
+    task = Task.objects.filter(id=task_id, user=user).first()
+    if not task:
+        raise HttpError(404, "Task not found")
+    if (task.workflow_version or "default").lower() != "videogen":
+        raise HttpError(400, "Not a videogen task")
+
+    segmentId = 1
+    if redo and segmentId <= task.current_segment:
+        running_exists = task.segments.filter(status="running").exists()
+        if running_exists:
+            raise HttpError(409, "Task is running, retry later")
+        _prepare_redo(task, segmentId)
+        task.refresh_from_db()
+
+    if segmentId != task.current_segment + 1:
+        raise HttpError(400, "Segment cannot be executed out of order")
+
+    task.ensure_story_dir()
+    seg = task.segments.filter(segment_id=segmentId).first()
+    if not seg:
+        raise HttpError(400, "Unknown segment")
+
+    # Merge overrides into metadata_json for the worker to pick up
+    if payload is not None:
+        meta = seg.metadata_json or {}
+        for k, v in payload.model_dump(exclude_none=True).items():
+            meta[k] = v
+        seg.metadata_json = meta
+
+    if seg.status == "running":
+        async_id = None
+    else:
+        seg.status = "running"
+        if not seg.started_at:
+            seg.started_at = timezone.now()
+        seg.error_message = ""
+        seg.save(update_fields=["status", "started_at", "error_message", "metadata_json"])
         if task.status in ("pending", "failed"):
             task.status = "running"
             task.save(update_fields=["status"])
