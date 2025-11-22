@@ -374,6 +374,7 @@ const TaskWorkspace: React.FC = () => {
                 segmentId={viewingSegmentId} 
                 urls={resources} 
                 taskMode={taskMode}
+                completedSegId={completedSegId}
                 onResourceUpdate={handleResourceUpdate} 
                 fetchFile={fetchFile}
                 fetchSegmentResources={fetchSegmentResources} 

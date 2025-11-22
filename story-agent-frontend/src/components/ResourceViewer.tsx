@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { taskApi } from '../lib/api';
+import { api, taskApi } from '../lib/api';
 import { SEGMENT_TYPE_MAP, VIDEOGEN_SEGMENT_TYPE_MAP } from '../types';
 
 export type FetchFileFn = (url: string, type: 'blob' | 'json', onProgress?: (percent: number) => void) => Promise<any>;
@@ -10,6 +10,7 @@ interface Props {
   segmentId: number;
   urls: string[];
   taskMode?: 'story' | 'videogen';
+  completedSegId: number;
   onResourceUpdate?: () => void; 
   fetchFile: FetchFileFn; 
   fetchSegmentResources?: FetchSegmentResourcesFn;
@@ -79,7 +80,6 @@ const useSecureResource = (url: string, fetchFile: FetchFileFn) => {
   return { objectUrl, loading, progress, error };
 };
 
-// 音频播放小组件
 const InlineAudioPlayer: React.FC<{ src: string; fetchFile: FetchFileFn }> = ({ src, fetchFile }) => {
   const { objectUrl, loading } = useSecureResource(src, fetchFile);
   if (loading) return <span className="text-xs text-gray-400 ml-2">加载音频...</span>;
@@ -133,8 +133,6 @@ const SecureVideo: React.FC<{ src: string; fetchFile: FetchFileFn }> = ({ src, f
     </video>
   );
 };
-
-// --- Storyboard ---
 
 interface StoryboardProps {
   data: StoryData;
@@ -321,9 +319,16 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
   );
 };
 
-// --- Main Container ---
-
-const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = 'story', onResourceUpdate, fetchFile, fetchSegmentResources }) => {
+const ResourceViewer: React.FC<Props> = ({ 
+  taskId, 
+  segmentId, 
+  urls, 
+  taskMode = 'story', 
+  onResourceUpdate, 
+  fetchFile, 
+  fetchSegmentResources,
+  completedSegId 
+}) => {
   const [jsonContent, setJsonContent] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [speechContextData, setSpeechContextData] = useState<any>(null);
@@ -334,6 +339,7 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
     let active = true;
     setLoadError(null);
     
+    // @ts-ignore
     const type = taskMode === 'videogen' ? VIDEOGEN_SEGMENT_TYPE_MAP[segmentId] : SEGMENT_TYPE_MAP[segmentId];
     
     if (type === 'story_json' || type === 'split_json') {
@@ -343,7 +349,7 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
           .then(data => { if (active) setJsonContent(data); })
           .catch(err => { 
             console.error(err);
-            if (active) setLoadError("加载故事脚本失败，请稍后重试");
+            if (active) setLoadError("加载故事脚本失败");
           })
           .finally(() => { if (active) setLoading(false); });
       } else {
@@ -351,7 +357,8 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
       }
     }
 
-    if (type === 'audio' && fetchSegmentResources) {
+    // 加载 Speech 上下文 (Segment 3)
+    if (type === 'audio' && fetchSegmentResources && completedSegId >= 3) {
       setLoading(true);
       fetchSegmentResources(3)
         .then(async (urls) => {
@@ -360,18 +367,21 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
              if (active) setSpeechContextData(data);
            }
         })
-        .catch(err => console.warn("无法获取 Speech 的文本上下文", err))
+        .catch(err => console.warn("context fetch failed", err))
         .finally(() => { if (active) setLoading(false); });
     }
 
-    if (['story_json', 'split_json', 'audio'].includes(type) && fetchSegmentResources) {
+    // 加载图片资源 (Segment 2)
+    if (['story_json', 'split_json', 'audio'].includes(type) && fetchSegmentResources && completedSegId >= 2) {
       fetchSegmentResources(2)
         .then(urls => {
           if (active && urls && urls.length > 0) {
             setImages(urls);
           }
         })
-        .catch(() => setImages([]));
+        .catch(() => { if (active) setImages([]); });
+    } else {
+      if (active) setImages([]);
     }
     
     if (!['story_json', 'split_json', 'audio'].includes(type)) {
@@ -379,7 +389,7 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
     }
 
     return () => { active = false; };
-  }, [taskId, segmentId, urls, taskMode, fetchFile, fetchSegmentResources]);
+  }, [taskId, segmentId, urls, taskMode, fetchFile, fetchSegmentResources, completedSegId]);
 
   const handleUpdateResource = async (newData: StoryData) => {
     try {
@@ -391,11 +401,11 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
       }
 
       await taskApi.updateResource(taskId, segmentId, payload);
-      alert("更新成功，后续步骤已重置");
+      alert("更新成功");
       if (onResourceUpdate) onResourceUpdate();
     } catch (e) {
       console.error("Update failed", e);
-      alert("更新失败，请重试");
+      alert("更新失败");
     }
   };
 
