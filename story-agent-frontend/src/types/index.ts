@@ -21,16 +21,14 @@ export const TaskStatusEnum = {
   PENDING: 'pending',
   RUNNING: 'running',
   COMPLETED: 'completed',
-  FAILED: 'failed'
+  FAILED: 'failed',
+  DELETED: 'deleted'
 } as const;
 
 export type TaskStatusEnum = typeof TaskStatusEnum[keyof typeof TaskStatusEnum];
-
 export interface TaskProgress {
-  current_segment: string; 
-  status: {
-    status: TaskStatusEnum;
-  };
+  current_segment: number; 
+  status: TaskStatusEnum;
 }
 
 export interface ResourceResponse {
@@ -38,7 +36,6 @@ export interface ResourceResponse {
   urls: string[];
 }
 
-// WebSocket 消息类型定义
 export interface WSMessage {
   type: 'segment_finished' | 'segment_failed';
   task_id: string;
@@ -49,11 +46,11 @@ export interface WSMessage {
 }
 
 export const SEGMENT_TYPE_MAP: Record<number, 'story_json' | 'image' | 'split_json' | 'audio' | 'video'> = {
-  1: 'story_json', // Story (JSON)
-  2: 'image',      // Image
-  3: 'split_json', // Split (JSON)
-  4: 'audio',      // Speech
-  5: 'video',      // Video
+  1: 'story_json',
+  2: 'image',
+  3: 'split_json',
+  4: 'audio',
+  5: 'video',
 };
 
 export const VIDEOGEN_SEGMENT_TYPE_MAP: Record<number, 'video'> = {
