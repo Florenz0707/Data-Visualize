@@ -41,7 +41,7 @@ const useSecureResource = (url: string) => {
           setObjectUrl(blobUrl);
         }
       } catch (e) {
-        console.error("Resource load failed", e);
+        if (active) setLoading(false);
       } finally {
         if (active) setLoading(false);
       }
@@ -66,8 +66,13 @@ const InlineAudioPlayer: React.FC<{ src: string }> = ({ src }) => {
 
 const SecureImage: React.FC<{ src: string }> = ({ src }) => {
   const { objectUrl, loading } = useSecureResource(src);
-  if (loading) return <div className="w-full h-48 bg-gray-100 animate-pulse rounded flex items-center justify-center text-gray-400">加载图片...</div>;
-  return <img src={objectUrl} alt="Generated" className="w-full h-auto rounded shadow hover:shadow-lg transition" />;
+  if (loading) return (
+    <div className="w-full aspect-video bg-purple-100/50 animate-pulse rounded flex items-center justify-center text-purple-300 text-xs">
+      加载图片...
+    </div>
+  );
+  if (!objectUrl) return null;
+  return <img src={objectUrl} alt="Generated" className="w-full h-auto rounded shadow-sm border border-purple-100 hover:shadow-md transition" />;
 };
 
 const SecureVideo: React.FC<{ src: string }> = ({ src }) => {
@@ -83,9 +88,10 @@ interface StoryboardProps {
   mode: 'read' | 'edit-story' | 'edit-split' | 'speech';
   onSave?: (newData: StoryData) => Promise<void>;
   audioUrls?: string[]; 
+  imageUrls?: string[];
 }
 
-const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audioUrls }) => {
+const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audioUrls, imageUrls }) => {
   const [localData, setLocalData] = useState<StoryData>(data);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -148,6 +154,8 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
         {localData.pages.map((page, index) => {
           const segments = localData.segmented_pages?.[index] || [];
           const sceneNum = index + 1;
+          
+          const relatedImageUrl = imageUrls && imageUrls[index];
 
           return (
             <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow duration-200">
@@ -176,24 +184,43 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
                   <div className="flex flex-col h-full">
-                    {page.image_prompt ? (
-                      <div className="bg-purple-50 p-5 rounded-lg border border-purple-100 h-full flex flex-col min-h-[160px]">
-                        <h4 className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-3 flex items-center gap-2 shrink-0">
-                          <span>🎨</span> Image Prompt
-                        </h4>
-                        <p className="text-gray-600 text-sm italic leading-relaxed flex-1">
+                    {/* Image Prompt Section */}
+                    <div className="bg-purple-50 p-5 rounded-lg border border-purple-100 h-full flex flex-col min-h-[200px]">
+                      <h4 className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-3 flex items-center gap-2 shrink-0">
+                        <span>🎨</span> Image Prompt
+                      </h4>
+                      
+                      {/* 文字描述 */}
+                      {page.image_prompt ? (
+                        <p className="text-gray-600 text-sm italic leading-relaxed mb-4">
                           {page.image_prompt}
                         </p>
+                      ) : (
+                        <div className="text-gray-400 text-sm italic border border-purple-200 border-dashed p-2 rounded mb-4 text-center">
+                           等待生成提示词...
+                        </div>
+                      )}
+
+                      {/* 图片展示区域 (推到底部) */}
+                      <div className="mt-auto">
+                        {relatedImageUrl ? (
+                          <div className="overflow-hidden rounded-md border border-purple-200/50 shadow-sm bg-white">
+                            <SecureImage src={relatedImageUrl} />
+                          </div>
+                        ) : (
+                          page.image_prompt && (
+                            <div className="w-full aspect-video bg-purple-100/30 border border-purple-200 border-dashed rounded-md flex items-center justify-center text-purple-300 text-xs">
+                              图片等待生成...
+                            </div>
+                          )
+                        )}
                       </div>
-                    ) : (
-                      <div className="bg-gray-50 p-5 rounded-lg border border-gray-200 border-dashed flex items-center justify-center h-full min-h-[160px]">
-                        <span className="text-gray-400 text-sm italic">提示词将在 Image 阶段生成...</span>
-                      </div>
-                    )}
+                    </div>
                   </div>
 
                   <div className="flex flex-col h-full">
-                    <div className="bg-green-50 p-5 rounded-lg border border-green-100 h-full flex flex-col min-h-[160px]">
+                    {/* Split/Speech Section */}
+                    <div className="bg-green-50 p-5 rounded-lg border border-green-100 h-full flex flex-col min-h-[200px]">
                       <h4 className="text-xs font-bold text-green-600 uppercase tracking-wider mb-3 shrink-0 flex items-center gap-2">
                         {mode === 'speech' ? <span>🎙️ Speech & Audio</span> : <span>📝 Split Segments</span>}
                       </h4>
@@ -251,6 +278,8 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
   const [jsonContent, setJsonContent] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [speechContextData, setSpeechContextData] = useState<any>(null);
+  
+  const [images, setImages] = useState<string[]>([]);
 
   useEffect(() => {
     // @ts-ignore
@@ -277,6 +306,18 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
         })
         .catch(err => console.warn("无法获取 Speech 的文本上下文", err))
         .finally(() => setLoading(false));
+    }
+
+    if (['story_json', 'split_json', 'audio'].includes(type)) {
+      taskApi.getResource(taskId, 2)
+        .then(res => {
+          if (res.data.urls && res.data.urls.length > 0) {
+            setImages(res.data.urls);
+          }
+        })
+        .catch(() => {
+          setImages([]);
+        });
     }
 
   }, [taskId, segmentId, urls, taskMode]);
@@ -306,18 +347,20 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
 
   if (loading) return <div className="p-10 text-center text-gray-400">加载资源中...</div>;
 
+  // 1. Storyboard (传入 imageUrls)
   if (type === 'story_json' && isStoryData(jsonContent)) {
-    return <StoryboardViewer data={jsonContent} mode="edit-story" onSave={handleUpdateResource} />;
+    return <StoryboardViewer data={jsonContent} mode="edit-story" onSave={handleUpdateResource} imageUrls={images} />;
   }
 
   if (type === 'split_json' && isStoryData(jsonContent)) {
-    return <StoryboardViewer data={jsonContent} mode="edit-split" onSave={handleUpdateResource} />;
+    return <StoryboardViewer data={jsonContent} mode="edit-split" onSave={handleUpdateResource} imageUrls={images} />;
   }
 
   if (type === 'audio' && isStoryData(speechContextData)) {
-    return <StoryboardViewer data={speechContextData} mode="speech" audioUrls={urls} />;
+    return <StoryboardViewer data={speechContextData} mode="speech" audioUrls={urls} imageUrls={images} />;
   }
 
+  // 2. 其他资源
   return (
     <div className="p-8">
       {type === 'audio' && (
@@ -332,7 +375,6 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
         <div className="space-y-4">{urls.map((url, i) => <SecureVideo key={i} src={url} />)}</div>
       )}
       
-      {/* Fallback for unknown types */}
       {![ 'story_json', 'split_json', 'audio', 'image', 'video'].includes(type) && (
         <div>未知资源类型: {type}</div>
       )}
