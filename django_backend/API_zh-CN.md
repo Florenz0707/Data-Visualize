@@ -172,24 +172,9 @@ POST /api/videogen/new（鉴权）
 ### 4.2 执行 videogen
 POST /api/videogen/{task_id}/execute（鉴权）
 
-请求体（全部可选，用于覆盖默认参数）
-```json
-{
-  "prompt": "覆盖 topic 的文本提示",
-  "model": "gen4_turbo",
-  "ratio": "1280:720",
-  "prompt_image_path": "./example.png",
-  "prompt_image_data_uri": "data:image/png;base64,...",
-  "width": 1280,
-  "height": 720,
-  "fps": 24,
-  "duration": 5,
-  "use_mock": false
-}
-```
 说明
-- 传入 prompt_image_path 或 prompt_image_data_uri 时走“图生视频（image_to_video）”；否则“文本生视频（text_to_video）”。
-- use_mock=true 时本地生成占位视频，便于离线调试；生产建议 false。
+- 无请求体：直接使用创建任务时的参数（topic 作为 prompt；其余参数来自配置 t2v_generation.params）
+- 可重做：POST /api/videogen/{task_id}/execute?redo=true
 - 执行为异步，返回 202：
 ```json
 { "accepted": true, "celery_task_id": "string|null", "message": "Execution queued" }

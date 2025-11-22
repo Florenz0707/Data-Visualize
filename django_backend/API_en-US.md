@@ -173,24 +173,9 @@ Note: topic is used as the prompt.
 ### 4.2 Execute videogen
 POST /api/videogen/{task_id}/execute (auth)
 
-Request body (all optional, for overriding defaults)
-```json
-{
-  "prompt": "Overrides topic",
-  "model": "gen4_turbo",
-  "ratio": "1280:720",
-  "prompt_image_path": "./example.png",
-  "prompt_image_data_uri": "data:image/png;base64,...",
-  "width": 1280,
-  "height": 720,
-  "fps": 24,
-  "duration": 5,
-  "use_mock": false
-}
-```
 Behavior
-- If prompt_image_path or prompt_image_data_uri is provided, the system runs image_to_video. Otherwise, text_to_video.
-- use_mock=true generates a local placeholder mp4 for offline testing; set to false in production.
+- No request body: the execution uses parameters defined at task creation (topic as prompt; other params from t2v_generation.params).
+- Redo: POST /api/videogen/{task_id}/execute?redo=true
 - Asynchronous execution, returns 202:
 ```json
 { "accepted": true, "celery_task_id": "string|null", "message": "Execution queued" }

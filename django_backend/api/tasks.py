@@ -83,11 +83,8 @@ def execute_task_segment(self, task_id: int, segment_id: int):
         if (task.workflow_version or "default").lower() == "videogen":
             if segment_id != 1:
                 raise ValueError("Unknown segment for videogen workflow")
-            # topic serves as prompt for T2V
-            seg_obj = TaskSegment.objects.filter(task=task, segment_id=segment_id).first()
-            overrides = (seg_obj.metadata_json or {}) if seg_obj else {}
-            effective_prompt = overrides.get("prompt", task.topic)
-            video = runner.run_video_t2v(story_dir, prompt=effective_prompt, overrides=overrides)
+            # Use only task creation parameters (topic as prompt), no per-execution overrides
+            video = runner.run_video_t2v(story_dir, prompt=task.topic, overrides=None)
             created_resources = [video]
             rtype = "video"
         else:
