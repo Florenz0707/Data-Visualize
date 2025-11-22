@@ -274,6 +274,9 @@ class SlideshowVideoComposeAgent:
         caption_cfg.update((params.get("caption") or {}))
 
         enable_captions = bool(caption_cfg.get("enable_captions", True))
+        use_global_captions = bool(cfg_params.get("use_global_captions", True))  # generate a global SRT (single timeline)
+        burn_in_captions = bool(cfg_params.get("burn_in_captions", False))  # if true, burn SRT into final video; default off to avoid duplicates
+        export_srt_on_burn = bool(cfg_params.get("export_srt_on_burn", False))  # when burning in, whether to keep output.srt on disk
         area_height = int(caption_cfg.get("area_height", max(24, int(height * 0.06))))
         font_cfg = caption_cfg.get("font", "Arial")
         try:
@@ -328,8 +331,13 @@ class SlideshowVideoComposeAgent:
                 fontname = candidate.stem
 
         total_height = height + area_height
-        logger.info("[VideoCompose] captions: enable=%s area_height=%d font=%s fontsize=%d color=%s outline=%.2f shadow=%.2f align=%d margin_v=%d fontsdir=%s",
-                    enable_captions, area_height, fontname, fontsize, color, outline, shadow, alignment, margin_v, str(fontsdir) if fontsdir else "(system)")
+        logger.info("[VideoCompose][Captions] enable=%s use_global=%s burn_in=%s area_height=%d font=%s fontsize=%d color=%s outline=%.2f shadow=%.2f align=%d margin_v=%d max_chars_line=%d fontsdir=%s",
+                    enable_captions, use_global_captions, bool(cfg_params.get("burn_in_captions", False)), area_height, fontname, fontsize, color, outline, shadow, alignment, margin_v, max_chars_line, str(fontsdir) if fontsdir else "(system)")
+        if enable_captions:
+            if use_global_captions:
+                logger.info("[VideoCompose][Captions] mode=global_srt burn_in=%s", bool(cfg_params.get("burn_in_captions", False)))
+            else:
+                logger.info("[VideoCompose][Captions] mode=per_page_ass")
 
         # Gather assets
         img_dir = story_dir / "image"
@@ -431,6 +439,61 @@ class SlideshowVideoComposeAgent:
             if cur: lines.append(cur)
             return "\\N".join(lines)
 
+        def _fmt_srt_time(seconds: float) -> str:
+            if seconds < 0:
+                seconds = 0
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = int(seconds % 60)
+            ms = int(round((seconds - int(seconds)) * 1000))
+            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+        def write_srt(path: Path, entries: list[tuple[float, float, str]]):
+            # entries: list of (abs_start, abs_end, text)
+            # 1) normalize & filter blanks
+            norm = []
+            for (st, et, txt) in entries:
+                try:
+                    s = max(0.0, float(st)); e = float(et)
+                except Exception:
+                    continue
+                t = (txt or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+                if not t:
+                    continue
+                if not (e > s):
+                    e = s + 0.01
+                norm.append((s, e, t))
+            # 2) sort by time
+            norm.sort(key=lambda x: (x[0], x[1]))
+            # 3) merge adjacent/overlapping duplicates
+            merged = []
+            MERGE_GAP = 0.05  # seconds tolerance for joining
+            for (s, e, t) in norm:
+                if not merged:
+                    merged.append([s, e, t])
+                    continue
+                ps, pe, pt = merged[-1]
+                if t == pt and s <= pe + MERGE_GAP:
+                    # extend previous
+                    merged[-1][1] = max(pe, e)
+                else:
+                    merged.append([s, e, t])
+            # 4) drop ultra-short lines (<60ms) after merge
+            cleaned = []
+            for s, e, t in merged:
+                if (e - s) >= 0.06:
+                    cleaned.append((s, e, t))
+            # 5) write SRT
+            lines_out = []
+            idx = 1
+            for (st, et, txt) in cleaned:
+                lines_out.append(str(idx))
+                lines_out.append(f"{_fmt_srt_time(st)} --> {_fmt_srt_time(et)}")
+                lines_out.append(txt)
+                lines_out.append("")
+                idx += 1
+            path.write_text("\n".join(lines_out), encoding="utf-8")
+
         def write_ass(path: Path, lines):
             primary = color; outline_col = stroke_color
             secondary = "&H000000FF"; back = "&H64000000"
@@ -449,6 +512,9 @@ class SlideshowVideoComposeAgent:
         logger.info("[VideoCompose] temp_dir=%s", temp_dir)
         try:
             page_videos=[]; audio_global_cursor=0
+            # For global captions timeline
+            global_captions = []  # list of (abs_start, abs_end, text)
+            timeline = 0.0
             for idx, img in enumerate(images):
                 page = idx+1; need = seg_counts[idx]
                 per_page_files = list((story_dir/"speech").glob(f"s{page}_*.wav")) + list((story_dir/"speech").glob(f"s{page}_*.mp3"))
@@ -470,7 +536,7 @@ class SlideshowVideoComposeAgent:
                     st=t; et=t+max(0.01,d); t=et
                     lines.append((st,et, seg_pages[idx][j] if j < len(seg_pages[idx]) else ""))
                 ass = Path(temp_dir)/f"page_{page}.ass"
-                if enable_captions:
+                if enable_captions and not use_global_captions:
                     write_ass(ass, lines)
                     logger.info("[VideoCompose] wrote ASS for page %d -> %s", page, ass)
                 list_file = Path(temp_dir)/f"aud_list_{page}.txt"
@@ -480,7 +546,8 @@ class SlideshowVideoComposeAgent:
                 run_ffmpeg([ffmpeg_bin, "-y","-f","concat","-safe","0","-i",str(list_file),"-c:a","pcm_s16le",str(merged)], f"concat_audio_page{page}")
                 # Build per-page video filter
                 total_h = height + area_height
-                frames = max(1, int(round(fps * max(0.01, t))))
+                import math
+                frames = max(1, int(math.ceil(fps * max(0.01, t))))
                 if enable_kb:
                     # ratio expression across frames [0..1]
                     if frames > 1:
@@ -506,7 +573,7 @@ class SlideshowVideoComposeAgent:
                 else:
                     vf_core = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,fps={fps},setsar=1"
                 vf = f"{vf_core},pad={width}:{total_h}:(ow-iw)/2:0:black"
-                if enable_captions:
+                if enable_captions and not use_global_captions:
                     if fontsdir:
                         vf += f",subtitles={ass.as_posix()}:fontsdir={fontsdir.as_posix()}"
                     else:
@@ -532,7 +599,29 @@ class SlideshowVideoComposeAgent:
                 run_ffmpeg([ffmpeg_bin, "-y","-loop","1","-i",str(img),"-i",str(merged),"-vf",vf,
                             "-c:v","libx264","-pix_fmt","yuv420p",
                             "-c:a","aac","-shortest",str(page_mp4)], f"make_page_video_{page}")
+                # Probe actual encoded page duration to account for codec rounding
+                pv_d = ffprobe_dur(page_mp4) or float(t)
+                # accumulate global captions with scaled times per page (if enabled)
+                if enable_captions and use_global_captions:
+                    scale = (pv_d / float(t)) if float(t) > 0 else 1.0
+                    # If we use video crossfade but DO NOT acrossfade audio, trim last segments to 'off' (t - crossfade)
+                    off_local = float(t) - float(crossfade) if (enable_crossfade and crossfade > 0 and not enable_audio_crossfade) else float(t)
+                    off_local = max(0.0, off_local)
+                    for (st, et, txt) in lines:
+                        st_f = float(st); et_f = float(et)
+                        if et_f > off_local:
+                            et_f = off_local
+                        if et_f <= st_f + 1e-3:
+                            continue
+                        abs_st = timeline + st_f * scale
+                        abs_et = timeline + et_f * scale
+                        global_captions.append((abs_st, abs_et, str(txt)))
                 page_videos.append(page_mp4)
+                # advance global timeline by encoded duration (account for crossfade overlap)
+                if enable_crossfade and crossfade > 0:
+                    timeline += max(0.0, float(pv_d) - float(crossfade))
+                else:
+                    timeline += float(pv_d)
             # Crossfade between pages if enabled; otherwise fast concat
             if enable_crossfade and crossfade > 0 and len(page_videos) > 1:
                 if not ffmpeg_has_filter(ffmpeg_bin, "xfade"):
@@ -629,6 +718,30 @@ class SlideshowVideoComposeAgent:
                             logger.warning("[VideoCompose] failed to mix BGM: %s", exc)
                 else:
                     logger.warning("[VideoCompose] bgm_path provided but file missing: %s", bgm_file)
+
+            # Global captions export and optional burn-in
+            if enable_captions and use_global_captions and global_captions:
+                try:
+                    # Write SRT next to output with same basename so players auto-load
+                    srt_path = output.with_suffix(".srt")
+                    write_srt(srt_path, global_captions)
+                    logger.info("[VideoCompose] wrote global SRT: %s (entries=%d)", srt_path, len(global_captions))
+                    if burn_in_captions:
+                        subbed = output.with_name(output.stem + "_sub.mp4")
+                        sub_filter = f"subtitles={srt_path.as_posix()}"
+                        run_ffmpeg([
+                            ffmpeg_bin,
+                            "-y",
+                            "-i", str(output),
+                            "-vf", sub_filter,
+                            "-c:v", "libx264",
+                            "-pix_fmt", "yuv420p",
+                            "-c:a", "copy",
+                            str(subbed)
+                        ], "overlay_srt")
+                        shutil.move(subbed, output)
+                except Exception as exc:
+                    logger.warning("[VideoCompose] failed to write/overlay SRT: %s", exc)
 
             logger.info("[VideoCompose] done -> %s", output)
             return str(output)
