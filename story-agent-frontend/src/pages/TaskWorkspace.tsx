@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
-import { taskApi } from '../lib/api';
+import { taskApi, api } from '../lib/api'; 
 import type { WorkflowStep, TaskProgress } from '../types';
 import { TaskStatusEnum } from '../types';
-import ResourceViewer from '../components/ResourceViewer';
+import ResourceViewer, { type FetchFileFn } from '../components/ResourceViewer';
 import { useWebSocket } from '../context/WebSocketContext';
 
 const TaskWorkspace: React.FC = () => {
@@ -24,6 +24,56 @@ const TaskWorkspace: React.FC = () => {
   const timerRef = useRef<number | undefined>(undefined);
   const autoStartRef = useRef(false);
 
+  const resourcesCache = useRef<Map<number, string[]>>(new Map());
+  const fileCache = useRef<Map<string, { data: any, type: 'blob' | 'json' }>>(new Map());
+  
+  const viewingSegmentIdRef = useRef<number | null>(null);
+  useEffect(() => { viewingSegmentIdRef.current = viewingSegmentId; }, [viewingSegmentId]);
+
+  const clearCaches = useCallback(() => {
+    resourcesCache.current.clear();
+    fileCache.current.clear();
+  }, []);
+
+  const fetchFile: FetchFileFn = useCallback(async (url, type, onProgress) => {
+    if (fileCache.current.has(url)) {
+      const cached = fileCache.current.get(url);
+      if (cached?.type === type) {
+        if (onProgress) onProgress(100);
+        return Promise.resolve(cached.data);
+      }
+    }
+
+    const res = await api.get('/resource', {
+      params: { url },
+      responseType: type === 'json' ? 'json' : 'blob',
+      onDownloadProgress: (event) => {
+        if (onProgress && event.total) {
+          onProgress(Math.round((event.loaded * 100) / event.total));
+        }
+      }
+    });
+
+    fileCache.current.set(url, { data: res.data, type });
+    return res.data;
+  }, []);
+
+  const fetchSegmentResources = useCallback(async (segId: number): Promise<string[]> => {
+    if (!taskId) return [];
+    if (resourcesCache.current.has(segId)) {
+      return resourcesCache.current.get(segId) || [];
+    }
+    try {
+      const res = await taskApi.getResource(taskId, segId);
+      const urls = res.data.urls || [];
+      resourcesCache.current.set(segId, urls);
+      return urls;
+    } catch (e) {
+      console.error(`Failed to fetch resources for segment ${segId}`);
+      return [];
+    }
+  }, [taskId]);
+
   const getCompletedSegId = useCallback((p: TaskProgress | null) => {
     if (!p) return 0;
     if (p.status === TaskStatusEnum.COMPLETED) {
@@ -32,7 +82,6 @@ const TaskWorkspace: React.FC = () => {
     return p.current_segment;
   }, [workflow.length]);
 
-  // 1. 核心数据获取逻辑
   const fetchProgress = useCallback(async () => {
     if (!taskId) return;
     try {
@@ -45,10 +94,8 @@ const TaskWorkspace: React.FC = () => {
           name: name
         }));
         setWorkflow(steps);
-        
         const mode = data.workflow_version === 'videogen' ? 'videogen' : 'story';
         setTaskMode(mode);
-        
         setViewingSegmentId(prev => prev || 1);
         setIsInitialized(true);
       }
@@ -64,39 +111,61 @@ const TaskWorkspace: React.FC = () => {
     }
   }, [taskId, workflow.length, taskMode]);
 
-  // 2. 初始化
   useEffect(() => {
     fetchProgress();
     return () => clearTimeout(timerRef.current);
   }, [fetchProgress]);
 
-  // 3. WebSocket 监听
+  const loadResources = useCallback(async (segId: number, force: boolean = false) => {
+    if (!taskId) return;
+
+    if (force) {
+      resourcesCache.current.delete(segId);
+    }
+
+    if (resourcesCache.current.has(segId)) {
+      if (viewingSegmentIdRef.current === segId) {
+        setResources(resourcesCache.current.get(segId) || []);
+        setResourceLoading(false);
+      }
+      return;
+    }
+
+    if (viewingSegmentIdRef.current === segId) {
+      setResourceLoading(true);
+    }
+    
+    const urls = await fetchSegmentResources(segId);
+    
+    if (viewingSegmentIdRef.current === segId) {
+      setResources(urls);
+      setResourceLoading(false);
+    }
+  }, [taskId, fetchSegmentResources]);
+
   useEffect(() => {
     if (!lastMessage || !taskId) return;
     if (lastMessage.task_id == taskId) {
       fetchProgress();
-      if (lastMessage.type === 'segment_finished' && lastMessage.segment_id === viewingSegmentId) {
-        loadResources(viewingSegmentId);
+      if (lastMessage.type === 'segment_finished') {
+        resourcesCache.current.delete(lastMessage.segment_id);
+        fileCache.current.delete(lastMessage.segment_id.toString());
+        
+        if (lastMessage.segment_id === viewingSegmentId) {
+          loadResources(viewingSegmentId, true); 
+        }
       }
     }
-  }, [lastMessage, taskId, viewingSegmentId, fetchProgress]);
+  }, [lastMessage, taskId, viewingSegmentId, fetchProgress, loadResources]);
 
-  // 4. 加载资源逻辑
-  const loadResources = useCallback((segId: number) => {
-    if (!taskId) return;
-    setResourceLoading(true);
-    taskApi.getResource(taskId, segId)
-      .then(res => setResources(res.data.urls))
-      .catch(() => setResources([]))
-      .finally(() => setResourceLoading(false));
-  }, [taskId]);
-
-  // 5. 自动切换资源逻辑
   useEffect(() => {
     if (!taskId || !viewingSegmentId) return;
     const completedSegId = getCompletedSegId(progress);
     
     if (viewingSegmentId <= completedSegId) {
+       if (!resourcesCache.current.has(viewingSegmentId)) {
+         setResources([]);
+       }
        loadResources(viewingSegmentId);
     } else {
       setResources([]);
@@ -106,6 +175,10 @@ const TaskWorkspace: React.FC = () => {
   const executeStep = async (segId: number, redo: boolean = false) => {
     if (!taskId) return;
     try {
+      if (redo) {
+        resourcesCache.current.delete(segId);
+        fileCache.current.clear(); 
+      }
       await taskApi.execute(taskId, segId, redo);
       setProgress(prev => prev ? ({ ...prev, status: TaskStatusEnum.RUNNING }) : null);
     } catch (e) {
@@ -119,24 +192,25 @@ const TaskWorkspace: React.FC = () => {
   };
   
   const handleResourceUpdate = () => {
+    clearCaches();
     fetchProgress();
-    if (viewingSegmentId) loadResources(viewingSegmentId);
+    if (viewingSegmentId) loadResources(viewingSegmentId, true);
   };
 
-  // 6. 自动开始逻辑
   useEffect(() => {
     const autoStart = location.state?.autoStart;
     if (autoStart && !autoStartRef.current && isInitialized && progress) {
-        const rawCompletedSegId = progress.current_segment;
+        const completedSegId = getCompletedSegId(progress);
+        const isPending = progress.status === TaskStatusEnum.PENDING;
         
-        if (rawCompletedSegId === 0 && progress.status === TaskStatusEnum.PENDING && workflow.length > 0) {
+        if (completedSegId === 0 && isPending && workflow.length > 0) {
             autoStartRef.current = true;
             const firstStepId = workflow[0].id;
             setViewingSegmentId(firstStepId);
             executeStep(firstStepId, false);
         }
     }
-  }, [location.state, isInitialized, progress, workflow]);
+  }, [location.state, isInitialized, progress, workflow, getCompletedSegId]);
 
   if (!taskId) return <div>Invalid Task ID</div>;
 
@@ -242,11 +316,14 @@ const TaskWorkspace: React.FC = () => {
           ) : (
             viewingSegmentId && (
               <ResourceViewer 
+                key={viewingSegmentId} 
                 taskId={taskId} 
                 segmentId={viewingSegmentId} 
                 urls={resources} 
                 taskMode={taskMode}
                 onResourceUpdate={handleResourceUpdate} 
+                fetchFile={fetchFile}
+                fetchSegmentResources={fetchSegmentResources}
               />
             )
           )}
