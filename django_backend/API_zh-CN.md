@@ -83,7 +83,7 @@ POST /api/task/new（鉴权）
 
 请求体
 ```json
-{ "topic": "string", "main_role": "string(可选)", "scene": "string(可选)" }
+{ "topic": "string", "description": "string(可选)","main_role": "string(可选)", "scene": "string(可选)" }
 ```
 响应 200
 ```json
@@ -227,7 +227,7 @@ POST /api/videogen/new（鉴权）
 
 请求体
 ```json
-{ "topic": "作为 prompt 的长文本描述", "main_role": "可选", "scene": "可选" }
+{ "topic": "作为 prompt 的长文本描述", "description": "可选","main_role": "可选", "scene": "可选" }
 ```
 响应 200
 ```json
