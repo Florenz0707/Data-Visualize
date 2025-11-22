@@ -251,7 +251,34 @@ def task_progress(request: HttpRequest, task_id: int):
     task = Task.objects.filter(id=task_id, user=user).first()
     if not task:
         raise HttpError(404, "Task not found")
-    return TaskProgressOut(current_segment=task.current_segment, status=task.status)
+    wf_ver = (task.workflow_version or "default").lower()
+    segs = list(task.segments.order_by("segment_id").values_list("name", flat=True))
+    total = len(segs)
+    return TaskProgressOut(
+        current_segment=task.current_segment,
+        status=task.status,
+        workflow_version=wf_ver,
+        total_segments=total,
+        segment_names=list(segs),
+    )
+
+
+@api.get("/task/{task_id}/info")
+def task_info(request: HttpRequest, task_id: int):
+    user = require_user(request)
+    task = Task.objects.filter(id=task_id, user=user).first()
+    if not task:
+        raise HttpError(404, "Task not found")
+    wf_ver = (task.workflow_version or "default").lower()
+    segs = list(task.segments.order_by("segment_id").values_list("name", flat=True))
+    return {
+        "id": task.id,
+        "workflow_version": wf_ver,
+        "status": task.status,
+        "current_segment": task.current_segment,
+        "total_segments": len(segs),
+        "segment_names": segs,
+    }
 
 
 @api.get("/task/mytasks", response={200: TaskListOut})

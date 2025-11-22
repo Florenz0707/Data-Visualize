@@ -150,6 +150,7 @@ def execute_task_segment(self, task_id: int, segment_id: int):
                 "task_id": task.id,
                 "segment_id": segment_id,
                 "status": "completed",
+                "workflow_version": (task.workflow_version or "default").lower(),
                 "resources": rel_resources,
             },
         )
