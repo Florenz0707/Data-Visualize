@@ -54,7 +54,7 @@ export const authApi = {
 
 export const taskApi = {
   getWorkflow: () => api.get<WorkflowStep[]>('/task/workflow'),
-  create: (data: { topic: string; main_role?: string; scene?: string; workflow_version?: string }) => api.post('/task/new', data),
+  create: (data: { topic: string; main_role?: string; scene?: string; description?: string; workflow_version?: string }) => api.post('/task/new', data),
   getMyTasks: () => api.get<{ task_ids: string[] }>('/task/mytasks'),
   getProgress: (taskId: string) => api.get<TaskProgress>(`/task/${taskId}/progress`),
   getInfo: (taskId: string) => api.get<TaskInfo>(`/task/${taskId}/info`),
