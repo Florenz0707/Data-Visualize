@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { WorkflowStep, TaskProgress, ResourceResponse } from '../types';
+import type { WorkflowStep, TaskProgress, ResourceResponse, TaskInfo } from '../types';
 
 const API_BASE_URL = '/api';
 
@@ -57,6 +57,7 @@ export const taskApi = {
   create: (data: { topic: string; main_role?: string; scene?: string; workflow_version?: string }) => api.post('/task/new', data),
   getMyTasks: () => api.get<{ task_ids: string[] }>('/task/mytasks'),
   getProgress: (taskId: string) => api.get<TaskProgress>(`/task/${taskId}/progress`),
+  getInfo: (taskId: string) => api.get<TaskInfo>(`/task/${taskId}/info`),
   getResource: (taskId: string, segmentId: number) => api.get<ResourceResponse>(`/task/${taskId}/resource`, { params: { segmentId } }),
   execute: (taskId: string, segmentId: number, redo = false) => api.post(`/task/${taskId}/execute/${segmentId}`, null, { params: { redo } }),
   delete: (taskId: string) => api.delete(`/task/${taskId}`),

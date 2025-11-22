@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link, useLocation, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { taskApi } from '../lib/api';
 import type { WorkflowStep, TaskProgress } from '../types';
 import { TaskStatusEnum } from '../types';
@@ -10,10 +10,8 @@ const TaskWorkspace: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const { lastMessage, isConnected } = useWebSocket();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   
-  const isVideogen = searchParams.get('type') === 'videogen';
-  const taskMode = isVideogen ? 'videogen' : 'story';
+  const [taskMode, setTaskMode] = useState<'story' | 'videogen'>('story');
   
   const [workflow, setWorkflow] = useState<WorkflowStep[]>([]);
   const [progress, setProgress] = useState<TaskProgress | null>(null);
@@ -21,28 +19,32 @@ const TaskWorkspace: React.FC = () => {
   const [resources, setResources] = useState<string[]>([]);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [isLoadingProgress, setIsLoadingProgress] = useState(true); 
+  const [isInitialized, setIsInitialized] = useState(false);
   
   const timerRef = useRef<number | undefined>(undefined);
   const autoStartRef = useRef(false);
 
-  useEffect(() => {
-    if (isVideogen) {
-      setWorkflow([{ id: 1, name: "AI 视频生成" }]);
-      setViewingSegmentId(1);
-    } else {
-      taskApi.getWorkflow().then(res => {
-        setWorkflow(res.data);
-        if (res.data.length > 0) setViewingSegmentId(res.data[0].id);
-      });
-    }
-  }, [isVideogen]);
-
+  // 1. 核心数据获取逻辑
   const fetchProgress = useCallback(async () => {
     if (!taskId) return;
     try {
       const { data } = await taskApi.getProgress(taskId);
       setProgress(data);
       
+      if (data.segment_names && (workflow.length === 0 || data.workflow_version !== (taskMode === 'story' ? 'default' : 'videogen'))) {
+        const steps = data.segment_names.map((name, index) => ({
+          id: index + 1,
+          name: name
+        }));
+        setWorkflow(steps);
+        
+        const mode = data.workflow_version === 'videogen' ? 'videogen' : 'story';
+        setTaskMode(mode);
+        
+        setViewingSegmentId(prev => prev || 1);
+        setIsInitialized(true);
+      }
+
       if (data.status === TaskStatusEnum.RUNNING) {
         clearTimeout(timerRef.current);
         timerRef.current = window.setTimeout(fetchProgress, 3000);
@@ -52,8 +54,15 @@ const TaskWorkspace: React.FC = () => {
     } finally {
       setIsLoadingProgress(false);
     }
-  }, [taskId]);
+  }, [taskId, workflow.length, taskMode]);
 
+  // 2. 初始化：挂载时立即获取进度和元数据
+  useEffect(() => {
+    fetchProgress();
+    return () => clearTimeout(timerRef.current);
+  }, [fetchProgress]);
+
+  // 3. WebSocket 监听
   useEffect(() => {
     if (!lastMessage || !taskId) return;
     if (lastMessage.task_id == taskId) {
@@ -62,13 +71,9 @@ const TaskWorkspace: React.FC = () => {
         loadResources(viewingSegmentId);
       }
     }
-  }, [lastMessage, taskId, viewingSegmentId]);
+  }, [lastMessage, taskId, viewingSegmentId, fetchProgress]);
 
-  useEffect(() => {
-    fetchProgress();
-    return () => clearTimeout(timerRef.current);
-  }, [fetchProgress]);
-
+  // 4. 加载资源逻辑
   const loadResources = useCallback((segId: number) => {
     if (!taskId) return;
     setResourceLoading(true);
@@ -78,6 +83,7 @@ const TaskWorkspace: React.FC = () => {
       .finally(() => setResourceLoading(false));
   }, [taskId]);
 
+  // 5. 自动切换资源逻辑
   useEffect(() => {
     if (!taskId || !viewingSegmentId) return;
     const completedSegId = progress ? progress.current_segment : 0;
@@ -108,19 +114,20 @@ const TaskWorkspace: React.FC = () => {
     if (viewingSegmentId) loadResources(viewingSegmentId);
   };
 
+  // 6. 自动开始逻辑 (确保已初始化)
   useEffect(() => {
     const autoStart = location.state?.autoStart;
-    if (autoStart && !autoStartRef.current && workflow.length > 0 && progress) {
+    if (autoStart && !autoStartRef.current && isInitialized && progress) {
         const completedSegId = progress.current_segment;
         
-        if (completedSegId === 0 && progress.status === TaskStatusEnum.PENDING) {
+        if (completedSegId === 0 && progress.status === TaskStatusEnum.PENDING && workflow.length > 0) {
             autoStartRef.current = true;
             const firstStepId = workflow[0].id;
             setViewingSegmentId(firstStepId);
             executeStep(firstStepId, false);
         }
     }
-  }, [location.state, workflow, progress]);
+  }, [location.state, isInitialized, progress, workflow]);
 
   if (!taskId) return <div>Invalid Task ID</div>;
 
@@ -139,7 +146,7 @@ const TaskWorkspace: React.FC = () => {
           </Link>
           <div className="flex items-center gap-2 mt-3">
             <h2 className="font-bold text-lg text-gray-800">
-               {isVideogen ? '视频生成任务' : '故事生成任务'}
+               {taskMode === 'videogen' ? '视频生成任务' : '故事生成任务'}
             </h2>
           </div>
           <div className="text-xs text-gray-400 font-mono mb-2">{taskId}</div>
@@ -160,6 +167,7 @@ const TaskWorkspace: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {workflow.length === 0 && !isLoadingProgress && <div className="p-4 text-gray-400 text-sm">加载工作流...</div>}
           {workflow.map(step => {
             const isActive = viewingSegmentId === step.id;
             const isCompleted = step.id <= completedSegId;
@@ -185,7 +193,7 @@ const TaskWorkspace: React.FC = () => {
       <div className="flex-1 flex flex-col overflow-hidden bg-gray-50">
         <header className="bg-white border-b px-6 py-3 flex justify-between items-center h-16 shadow-sm z-20 relative">
           <h3 className="font-bold text-xl text-gray-800">
-            {workflow.find(w => w.id === viewingSegmentId)?.name}
+            {workflow.find(w => w.id === viewingSegmentId)?.name || '...'}
           </h3>
           
           <div className="space-x-3">

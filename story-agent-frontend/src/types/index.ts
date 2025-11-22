@@ -26,9 +26,22 @@ export const TaskStatusEnum = {
 } as const;
 
 export type TaskStatusEnum = typeof TaskStatusEnum[keyof typeof TaskStatusEnum];
+
 export interface TaskProgress {
   current_segment: number; 
   status: TaskStatusEnum;
+  workflow_version: 'default' | 'videogen';
+  total_segments: number;
+  segment_names: string[];
+}
+
+export interface TaskInfo {
+  id: string | number;
+  workflow_version: 'default' | 'videogen';
+  status: TaskStatusEnum;
+  current_segment: number;
+  total_segments: number;
+  segment_names: string[];
 }
 
 export interface ResourceResponse {
