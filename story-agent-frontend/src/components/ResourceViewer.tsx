@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { SEGMENT_TYPE_MAP } from '../types';
+import { SEGMENT_TYPE_MAP, VIDEOGEN_SEGMENT_TYPE_MAP } from '../types';
 
 interface Props {
   segmentId: number;
   urls: string[];
+  taskMode?: 'story' | 'videogen';
 }
 
 const useSecureResource = (url: string) => {
@@ -21,7 +22,7 @@ const useSecureResource = (url: string) => {
         setLoading(true);
         setError(false);
         const response = await api.get('/resource', { 
-          params: { url },
+          params: { url }, 
           responseType: 'blob' 
         });
         
@@ -116,10 +117,15 @@ const JsonViewer: React.FC<{ url: string; title: string }> = ({ url, title }) =>
   );
 };
 
-const ResourceViewer: React.FC<Props> = ({ segmentId, urls }) => {
+const ResourceViewer: React.FC<Props> = ({ segmentId, urls, taskMode = 'story' }) => {
   if (!urls || urls.length === 0) return <div className="text-gray-400 text-center py-10">暂无资源生成</div>;
 
-  const type = SEGMENT_TYPE_MAP[segmentId];
+  let type: string;
+  if (taskMode === 'videogen') {
+    type = VIDEOGEN_SEGMENT_TYPE_MAP[segmentId] || 'unknown';
+  } else {
+    type = SEGMENT_TYPE_MAP[segmentId];
+  }
 
   if (type === 'story_json') {
     return <div className="space-y-4">{urls.map((url, i) => <JsonViewer key={i} url={url} title="生成故事 (JSON)" />)}</div>;
@@ -130,30 +136,18 @@ const ResourceViewer: React.FC<Props> = ({ segmentId, urls }) => {
   }
 
   if (type === 'image') {
-    return (
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        {urls.map((url, i) => <SecureImage key={i} src={url} />)}
-      </div>
-    );
+    return <div className="grid grid-cols-2 md:grid-cols-3 gap-4">{urls.map((url, i) => <SecureImage key={i} src={url} />)}</div>;
   }
 
   if (type === 'audio') {
-    return (
-      <div className="space-y-2">
-        {urls.map((url, i) => <SecureAudio key={i} src={url} />)}
-      </div>
-    );
+    return <div className="space-y-2">{urls.map((url, i) => <SecureAudio key={i} src={url} />)}</div>;
   }
 
   if (type === 'video') {
-    return (
-      <div className="space-y-4">
-        {urls.map((url, i) => <SecureVideo key={i} src={url} />)}
-      </div>
-    );
+    return <div className="space-y-4">{urls.map((url, i) => <SecureVideo key={i} src={url} />)}</div>;
   }
 
-  return <div>未知资源类型</div>;
+  return <div>未知资源类型: {type}</div>;
 };
 
 export default ResourceViewer;

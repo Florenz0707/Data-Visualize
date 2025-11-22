@@ -9,6 +9,7 @@ const Dashboard: React.FC = () => {
   const [newTopic, setNewTopic] = useState('');
   const [role, setRole] = useState('');
   const [scene, setScene] = useState('');
+  const [taskMode, setTaskMode] = useState<'story' | 'videogen'>('story');
   const { logout } = useAuth();
   const navigate = useNavigate();
 
@@ -28,16 +29,26 @@ const Dashboard: React.FC = () => {
   const handleCreate = async () => {
     if (!newTopic) return;
     try {
-      const { data } = await taskApi.create({ topic: newTopic, main_role: role, scene });
+      // 构造请求参数，如果是 videogen 模式，带上 workflow_version
+      const payload = {
+        topic: newTopic,
+        main_role: role,
+        scene: scene,
+        workflow_version: taskMode === 'videogen' ? 'videogen' : undefined
+      };
+
+      const { data } = await taskApi.create(payload);
       setShowModal(false);
-      navigate(`/task/${data.task_id}`, { state: { autoStart: true } });
+      
+      const queryType = taskMode === 'videogen' ? '?type=videogen' : '';
+      navigate(`/task/${data.task_id}${queryType}`, { state: { autoStart: true } });
     } catch (error) {
       alert('创建失败');
     }
   };
 
   const handleDelete = async (e: React.MouseEvent, taskId: string) => {
-    e.preventDefault(); 
+    e.preventDefault();
     if (!window.confirm('确定要删除这个任务吗？此操作不可恢复。')) return;
     
     try {
@@ -62,18 +73,19 @@ const Dashboard: React.FC = () => {
             onClick={() => setShowModal(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition flex items-center gap-2"
           >
-            <span>+</span> 新建故事任务
+            <span>+</span> 新建任务
           </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {tasks.map((taskId) => (
+            // 注意：列表页无法直接区分任务类型，默认点击进入故事模式。
+            // 实际上用户可以在详情页发现不对时手动切模式，或者我们依赖用户记忆。
+            // 理想情况是后端列表接口返回任务类型，目前不做修改。
             <Link key={taskId} to={`/task/${taskId}`} className="block group relative">
               <div className="bg-white p-6 rounded-lg shadow-sm hover:shadow-md transition border border-gray-200 group-hover:border-blue-300">
                 <div className="flex justify-between items-start mb-2">
                     <div className="font-mono text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">ID: {taskId}</div>
-                    
-                    {/* 删除按钮 */}
                     <button 
                         onClick={(e) => handleDelete(e, taskId)}
                         className="text-gray-300 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition z-10"
@@ -84,7 +96,9 @@ const Dashboard: React.FC = () => {
                         </svg>
                     </button>
                 </div>
-                <div className="text-gray-800 font-medium text-lg mb-4">故事生成任务</div>
+                <div className="text-gray-800 font-medium text-lg mb-4">
+                  任务详情
+                </div>
                 <div className="text-blue-600 group-hover:translate-x-1 transition-transform inline-block text-sm font-semibold">进入工作区 &rarr;</div>
               </div>
             </Link>
@@ -102,10 +116,27 @@ const Dashboard: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg w-96 shadow-xl transform transition-all">
             <h3 className="text-lg font-bold mb-4 text-gray-800">新建任务</h3>
+            
+            {/* 模式切换 Tabs */}
+            <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
+              <button 
+                onClick={() => setTaskMode('story')}
+                className={`flex-1 py-1.5 text-sm font-medium rounded-md transition ${taskMode === 'story' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                多模态故事
+              </button>
+              <button 
+                onClick={() => setTaskMode('videogen')}
+                className={`flex-1 py-1.5 text-sm font-medium rounded-md transition ${taskMode === 'videogen' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                文本生视频
+              </button>
+            </div>
+
             <div className="space-y-3">
               <input 
                 className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" 
-                placeholder="主题" 
+                placeholder={taskMode === 'story' ? "主题 (必填)" : "Prompt 提示词 (必填)"} 
                 value={newTopic} 
                 onChange={e => setNewTopic(e.target.value)} 
               />
@@ -124,7 +155,9 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="flex justify-end gap-2 mt-6">
               <button onClick={() => setShowModal(false)} className="text-gray-500 px-4 py-2 hover:bg-gray-100 rounded transition">取消</button>
-              <button onClick={handleCreate} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition shadow">创建</button>
+              <button onClick={handleCreate} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition shadow">
+                {taskMode === 'story' ? '创建故事' : '生成视频'}
+              </button>
             </div>
           </div>
         </div>
