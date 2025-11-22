@@ -234,10 +234,14 @@ def task_new(request: HttpRequest, payload: TaskNewIn):
     )
     task.ensure_story_dir()
     if wf_ver == "videogen":
-        TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+        desc = (payload.description or "") if hasattr(payload, "description") else ""
+        meta = {"description": desc} if desc else {}
+        TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending", metadata_json=meta)
     else:
+        desc = (payload.description or "") if hasattr(payload, "description") else ""
         for segment in WorkflowDefinition.get_active_segments():
-            TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending")
+            meta = {"description": desc} if segment["id"] == 1 and desc else {}
+            TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending", metadata_json=meta)
     return TaskNewOut(task_id=task.id)
 
 
@@ -356,7 +360,9 @@ def videogen_new(request: HttpRequest, payload: TaskNewIn):
         workflow_version="videogen",
     )
     task.ensure_story_dir()
-    TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+    desc = (payload.description or "") if hasattr(payload, "description") else ""
+    meta = {"description": desc} if desc else {}
+    TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending", metadata_json=meta)
     return TaskNewOut(task_id=task.id)
 
 

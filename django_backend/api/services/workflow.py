@@ -56,7 +56,7 @@ class WorkflowRunner:
         return {"pages": []}
 
     # ========== Segment 1: Story ==========
-    def run_story(self, story_dir: str | Path, topic: str, main_role: str = "", scene: str = "") -> List[str]:
+    def run_story(self, story_dir: str | Path, topic: str, main_role: str = "", scene: str = "", description: str = "") -> List[str]:
         story_dir = self._story_dir(story_dir)
         cfg = dict(self.base_cfg["story_writer"])  # shallow copy
         merged_cfg = load_model_for_agent(cfg, 'llm')
@@ -67,6 +67,7 @@ class WorkflowRunner:
         _topic = topic or default_params.get("story_topic", "")
         _role = main_role or default_params.get("main_role", "")
         _scene = scene or default_params.get("scene", "")
+        _desc = description or default_params.get("description", "")
 
         parts = []
         if _topic:
@@ -75,6 +76,8 @@ class WorkflowRunner:
             parts.append(f"Main role: {_role}")
         if _scene:
             parts.append(f"Scene: {_scene}")
+        if _desc:
+            parts.append(f"Description: {_desc}")
         story_setting = "; ".join(parts) if parts else str(default_params)
 
         # Pass a single consolidated setting string to story agent

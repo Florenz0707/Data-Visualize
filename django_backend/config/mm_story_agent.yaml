@@ -80,7 +80,7 @@ video_compose:
     cfg:
         {}
     params:
-        enable_crossfade: false
+        enable_crossfade: true
         crossfade: 0.25
         enable_audio_crossfade: false # 关键：音频不做淡化/叠加
         # --- New effects (enabled by default; tune values as needed) ---
@@ -89,7 +89,7 @@ video_compose:
         fade_in: 0.2
         fade_out: 0.25
 
-        enable_ken_burns: true
+        enable_ken_burns: false
         kb_zoom_start: 0.8
         kb_zoom_end: 1.1
         kb_direction: center  # lr|rl|tb|bt|center

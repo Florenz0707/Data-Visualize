@@ -83,13 +83,22 @@ def execute_task_segment(self, task_id: int, segment_id: int):
         if (task.workflow_version or "default").lower() == "videogen":
             if segment_id != 1:
                 raise ValueError("Unknown segment for videogen workflow")
-            # Use only task creation parameters (topic as prompt), no per-execution overrides
-            video = runner.run_video_t2v(story_dir, prompt=task.topic, overrides=None)
+            # Use only task creation parameters (topic as prompt). Include optional description if provided at creation.
+            seg1 = TaskSegment.objects.filter(task=task, segment_id=1).first()
+            meta = (seg1.metadata_json or {}) if seg1 else {}
+            desc = (meta.get("description") or "").strip()
+            effective_prompt = task.topic.strip()
+            if desc:
+                effective_prompt = f"{effective_prompt}\n\nDescription: {desc}"
+            video = runner.run_video_t2v(story_dir, prompt=effective_prompt, overrides=None)
             created_resources = [video]
             rtype = "video"
         else:
             if segment_id == 1:
-                runner.run_story(story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene)
+                seg1 = TaskSegment.objects.filter(task=task, segment_id=1).first()
+                meta = (seg1.metadata_json or {}) if seg1 else {}
+                desc = meta.get("description", "")
+                runner.run_story(story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene, description=desc)
                 script_path = str(Path(story_dir) / "script_data.json")
                 created_resources = [script_path]
                 rtype = "json"
