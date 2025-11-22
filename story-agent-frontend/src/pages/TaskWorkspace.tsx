@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link, useLocation } from 'react-router-dom';
+import { useParams, Link, useLocation, useSearchParams } from 'react-router-dom';
 import { taskApi } from '../lib/api';
 import type { WorkflowStep, TaskProgress } from '../types';
 import { TaskStatusEnum } from '../types';
@@ -10,6 +10,10 @@ const TaskWorkspace: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const { lastMessage, isConnected } = useWebSocket();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+
+  const isVideogen = searchParams.get('type') === 'videogen';
+  const taskMode = isVideogen ? 'videogen' : 'story';
   
   const [workflow, setWorkflow] = useState<WorkflowStep[]>([]);
   const [progress, setProgress] = useState<TaskProgress | null>(null);
@@ -22,19 +26,26 @@ const TaskWorkspace: React.FC = () => {
 
   // 1. 初始化：加载工作流定义
   useEffect(() => {
-    taskApi.getWorkflow().then(res => {
-      setWorkflow(res.data);
-      if (res.data.length > 0) setViewingSegmentId(res.data[0].id);
-    });
-  }, []);
+    if (isVideogen) {
+      // 视频模式：硬编码单步工作流
+      const videoWorkflow = [{ id: 1, name: "AI 视频生成" }];
+      setWorkflow(videoWorkflow);
+      setViewingSegmentId(1);
+    } else {
+      // 故事模式：从后端获取
+      taskApi.getWorkflow().then(res => {
+        setWorkflow(res.data);
+        if (res.data.length > 0) setViewingSegmentId(res.data[0].id);
+      });
+    }
+  }, [isVideogen]);
 
-  // 2. 获取任务进度的核心函数
+  // 2. 获取任务进度
   const fetchProgress = useCallback(async () => {
     if (!taskId) return;
     try {
       const { data } = await taskApi.getProgress(taskId);
       setProgress(data);
-
       if (data.status.status === TaskStatusEnum.RUNNING) {
         clearTimeout(timerRef.current);
         timerRef.current = window.setTimeout(fetchProgress, 3000);
@@ -44,19 +55,16 @@ const TaskWorkspace: React.FC = () => {
     }
   }, [taskId]);
 
-  // 3. 监听 WebSocket 消息
+  // 3. WebSocket
   useEffect(() => {
     if (!lastMessage || !taskId) return;
-
     if (lastMessage.task_id == taskId) {
-      console.log("收到当前任务更新:", lastMessage);
       fetchProgress();
-      
       if (lastMessage.type === 'segment_finished' && lastMessage.segment_id === viewingSegmentId) {
         loadResources(viewingSegmentId);
       }
     }
-  }, [lastMessage, taskId]);
+  }, [lastMessage, taskId, viewingSegmentId]);
 
   // 4. 初始加载进度
   useEffect(() => {
@@ -64,7 +72,7 @@ const TaskWorkspace: React.FC = () => {
     return () => clearTimeout(timerRef.current);
   }, [fetchProgress]);
 
-  // 5. 加载资源逻辑
+  // 5. 加载资源
   const loadResources = useCallback((segId: number) => {
     if (!taskId) return;
     setResourceLoading(true);
@@ -74,10 +82,9 @@ const TaskWorkspace: React.FC = () => {
       .finally(() => setResourceLoading(false));
   }, [taskId]);
 
-  // 6. 自动切换资源逻辑
+  // 6. 自动资源加载逻辑
   useEffect(() => {
     if (!taskId || !viewingSegmentId) return;
-    
     const completedSegId = progress ? parseInt(progress.current_segment || '0') : 0;
     if (viewingSegmentId <= completedSegId) {
        loadResources(viewingSegmentId);
@@ -86,7 +93,7 @@ const TaskWorkspace: React.FC = () => {
     }
   }, [taskId, viewingSegmentId, progress, loadResources]);
 
-  // 抽象出执行函数
+  // 执行步骤
   const executeStep = async (segId: number, redo: boolean = false) => {
     if (!taskId) return;
     try {
@@ -102,16 +109,15 @@ const TaskWorkspace: React.FC = () => {
     if (viewingSegmentId) executeStep(viewingSegmentId, redo);
   };
 
+  // 7. 自动开始逻辑
   useEffect(() => {
     const autoStart = location.state?.autoStart;
-    // 条件：需要自动执行 + 还没执行过 + 工作流已加载 + 进度已加载
     if (autoStart && !autoStartRef.current && workflow.length > 0 && progress) {
         const completedSegId = parseInt(progress.current_segment || '0');
-        // 只有当任务完全处于初始状态（完成阶段为0 且 状态为 PENDING）时才自动执行
         if (completedSegId === 0 && progress.status.status === TaskStatusEnum.PENDING) {
-            console.log("Auto starting new task...");
             autoStartRef.current = true;
             const firstStepId = workflow[0].id;
+            // 确保UI同步选中
             setViewingSegmentId(firstStepId);
             executeStep(firstStepId, false);
         }
@@ -120,7 +126,6 @@ const TaskWorkspace: React.FC = () => {
 
   if (!taskId) return <div>Invalid Task ID</div>;
 
-  // current_segment 代表“已完成”的最新阶段
   const completedSegId = progress ? parseInt(progress.current_segment || '0') : 0;
   const taskStatus = progress?.status.status;
   const nextStepId = completedSegId + 1;
@@ -133,7 +138,11 @@ const TaskWorkspace: React.FC = () => {
           <Link to="/" className="text-gray-500 hover:text-gray-800 text-sm flex items-center gap-1">
             &larr; 返回列表
           </Link>
-          <h2 className="font-bold text-lg mt-3 text-gray-800">Task Workspace</h2>
+          <div className="flex items-center gap-2 mt-3">
+            <h2 className="font-bold text-lg text-gray-800">
+               {isVideogen ? '视频生成任务' : '故事生成任务'}
+            </h2>
+          </div>
           <div className="text-xs text-gray-400 font-mono mb-2">{taskId}</div>
           
           <div className="flex justify-between items-center mt-2">
@@ -215,7 +224,13 @@ const TaskWorkspace: React.FC = () => {
               <p>获取资源中...</p>
             </div>
           ) : (
-            viewingSegmentId && <ResourceViewer segmentId={viewingSegmentId} urls={resources} />
+            viewingSegmentId && (
+              <ResourceViewer 
+                segmentId={viewingSegmentId} 
+                urls={resources} 
+                taskMode={taskMode} // 传递任务模式
+              />
+            )
           )}
         </main>
       </div>

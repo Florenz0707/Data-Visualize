@@ -55,3 +55,7 @@ export const SEGMENT_TYPE_MAP: Record<number, 'story_json' | 'image' | 'split_js
   4: 'audio',      // Speech
   5: 'video',      // Video
 };
+
+export const VIDEOGEN_SEGMENT_TYPE_MAP: Record<number, 'video'> = {
+  1: 'video'
+};
