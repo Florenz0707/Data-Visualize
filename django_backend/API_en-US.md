@@ -103,7 +103,49 @@ GET /api/task/{task_id}/progress (auth)
 
 Response 200
 ```json
-{ "current_segment": 0, "status": "pending|running|completed|failed|deleted" }
+{
+  "current_segment": 0,
+  "status": "pending|running|completed|failed|deleted",
+  "workflow_version": "default|videogen",
+  "total_segments": 5,
+  "segment_names": ["Story", "Image", "Split", "Speech", "Video"]
+}
+```
+
+Task Info (one-shot metadata)
+GET /api/task/{task_id}/info (auth)
+
+Notes
+- Returns the workflow type (workflow_version), current step, total steps, and segment names in a single call.
+- Useful on first load to determine whether the task follows the default 5-step flow or the single-step videogen flow.
+
+Response 200 (examples)
+- Default workflow
+```json
+{
+  "id": 123,
+  "workflow_version": "default",
+  "status": "running",
+  "current_segment": 2,
+  "total_segments": 5,
+  "segment_names": ["Story", "Image", "Split", "Speech", "Video"]
+}
+```
+- Videogen workflow
+```json
+{
+  "id": 456,
+  "workflow_version": "videogen",
+  "status": "running",
+  "current_segment": 1,
+  "total_segments": 1,
+  "segment_names": ["VideoGen"]
+}
+```
+
+Example
+```bash
+curl -s "http://127.0.0.1:8000/api/task/$TASK/info" -H "Authorization: Bearer $ACCESS"
 ```
 
 ### 3.4 Execute a Segment

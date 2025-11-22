@@ -43,6 +43,9 @@ class TaskNewOut(BaseModel):
 class TaskProgressOut(BaseModel):
     current_segment: int
     status: str
+    workflow_version: str
+    total_segments: int
+    segment_names: List[str]
 
 
 class TaskListOut(BaseModel):

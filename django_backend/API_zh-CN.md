@@ -103,7 +103,37 @@ GET /api/task/{task_id}/progress（鉴权）
 
 响应 200
 ```json
-{ "current_segment": 0, "status": "pending|running|completed|failed|deleted" }
+{
+  "current_segment": 0,
+  "status": "pending|running|completed|failed|deleted",
+  "workflow_version": "default|videogen",
+  "total_segments": 5,
+  "segment_names": ["Story", "Image", "Split", "Speech", "Video"]
+}
+```
+
+### 3.4 任务元信息（一次性获取任务类型与编排）
+GET /api/task/{task_id}/info（鉴权）
+
+说明
+- 返回任务的工作流类型（workflow_version）、当前阶段、总阶段数以及阶段名称列表，便于前端一次性拿到“是默认 5 段还是 videogen 单段”等信息
+- 与 /progress 类似，但是一次性元信息快照，不需要解析其他接口
+
+响应 200（示例）
+```json
+{
+  "id": 123,
+  "workflow_version": "default",
+  "status": "running",
+  "current_segment": 2,
+  "total_segments": 5,
+  "segment_names": ["Story", "Image", "Split", "Speech", "Video"]
+}
+```
+
+示例
+```bash
+curl -s "http://127.0.0.1:8000/api/task/$TASK/info" -H "Authorization: Bearer $ACCESS"
 ```
 
 ### 3.4 执行某环节
