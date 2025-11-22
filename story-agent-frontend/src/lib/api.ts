@@ -31,11 +31,9 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       try {
         const { data } = await axios.post(`${API_BASE_URL}/refresh`);
-        
         localStorage.setItem('access_token', data.access_token);
         api.defaults.headers.common.Authorization = `Bearer ${data.access_token}`;
         originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
-        
         return api(originalRequest);
       } catch (refreshError) {
         localStorage.removeItem('access_token');
@@ -62,4 +60,5 @@ export const taskApi = {
   getResource: (taskId: string, segmentId: number) => api.get<ResourceResponse>(`/task/${taskId}/resource`, { params: { segmentId } }),
   execute: (taskId: string, segmentId: number, redo = false) => api.post(`/task/${taskId}/execute/${segmentId}`, null, { params: { redo } }),
   delete: (taskId: string) => api.delete(`/task/${taskId}`),
+  updateResource: (taskId: string, segmentId: number, data: any) => api.put(`/task/${taskId}/myresource/${segmentId}`, data),
 };
