@@ -1,6 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { api, taskApi } from '../lib/api';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { taskApi } from '../lib/api';
 import { SEGMENT_TYPE_MAP, VIDEOGEN_SEGMENT_TYPE_MAP } from '../types';
+
+export type FetchFileFn = (url: string, type: 'blob' | 'json', onProgress?: (percent: number) => void) => Promise<any>;
+export type FetchSegmentResourcesFn = (segId: number) => Promise<string[]>;
 
 interface Props {
   taskId: string; 
@@ -8,6 +11,8 @@ interface Props {
   urls: string[];
   taskMode?: 'story' | 'videogen';
   onResourceUpdate?: () => void; 
+  fetchFile: FetchFileFn; 
+  fetchSegmentResources?: FetchSegmentResourcesFn;
 }
 
 interface StoryPage {
@@ -24,14 +29,15 @@ function isStoryData(data: any): data is StoryData {
   return data && Array.isArray(data.pages) && data.pages.length > 0;
 }
 
-const useSecureResource = (url: string) => {
+const useSecureResource = (url: string, fetchFile: FetchFileFn) => {
   const [objectUrl, setObjectUrl] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0); 
+  const [error, setError] = useState<string | null>(null); 
+  const mounted = useRef(true);
 
   useEffect(() => {
-    let active = true;
+    mounted.current = true;
     let currentUrl = '';
     
     const fetchResource = async () => {
@@ -40,57 +46,42 @@ const useSecureResource = (url: string) => {
         setProgress(0);
         setError(null);
 
-        const response = await api.get('/resource', { 
-          params: { url }, 
-          responseType: 'blob',
-
-          onDownloadProgress: (progressEvent) => {
-            if (active && progressEvent.total) {
-              const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-              setProgress(percent);
-            }
-          }
+        const blobData = await fetchFile(url, 'blob', (percent) => {
+          if (mounted.current) setProgress(percent);
         });
 
-        if (active) {
-          const blobUrl = URL.createObjectURL(response.data);
+        if (mounted.current) {
+          const blobUrl = URL.createObjectURL(blobData);
           currentUrl = blobUrl;
           setObjectUrl(blobUrl);
         }
       } catch (e: any) {
-        console.error("Resource load failed", e);
-        if (active) {
-          if (e.response?.data instanceof Blob) {
-            const text = await e.response.data.text();
-            try {
-              const json = JSON.parse(text);
-              setError(json.detail || "资源加载失败");
-            } catch {
-              setError("资源加载失败");
-            }
+        if (mounted.current) {
+           if (e.response?.data instanceof Blob) {
+             setError("资源加载失败");
           } else {
             setError("网络请求失败");
           }
         }
       } finally {
-        if (active) setLoading(false);
+        if (mounted.current) setLoading(false);
       }
     };
 
     if (url) fetchResource();
     
     return () => { 
-      active = false; 
+      mounted.current = false; 
       if (currentUrl) URL.revokeObjectURL(currentUrl); 
     };
-  }, [url]);
+  }, [url, fetchFile]);
 
   return { objectUrl, loading, progress, error };
 };
 
 // 音频播放小组件
-const InlineAudioPlayer: React.FC<{ src: string }> = ({ src }) => {
-  const { objectUrl, loading } = useSecureResource(src);
+const InlineAudioPlayer: React.FC<{ src: string; fetchFile: FetchFileFn }> = ({ src, fetchFile }) => {
+  const { objectUrl, loading } = useSecureResource(src, fetchFile);
   if (loading) return <span className="text-xs text-gray-400 ml-2">加载音频...</span>;
   return (
     <div className="mt-2">
@@ -99,8 +90,8 @@ const InlineAudioPlayer: React.FC<{ src: string }> = ({ src }) => {
   );
 };
 
-const SecureImage: React.FC<{ src: string }> = ({ src }) => {
-  const { objectUrl, loading } = useSecureResource(src);
+const SecureImage: React.FC<{ src: string; fetchFile: FetchFileFn }> = ({ src, fetchFile }) => {
+  const { objectUrl, loading } = useSecureResource(src, fetchFile);
   if (loading) return (
     <div className="w-full aspect-video bg-purple-100/50 animate-pulse rounded flex items-center justify-center text-purple-300 text-xs">
       加载图片...
@@ -110,8 +101,8 @@ const SecureImage: React.FC<{ src: string }> = ({ src }) => {
   return <img src={objectUrl} alt="Generated" className="w-full h-auto rounded shadow-sm border border-purple-100 hover:shadow-md transition" />;
 };
 
-const SecureVideo: React.FC<{ src: string }> = ({ src }) => {
-  const { objectUrl, loading, progress, error } = useSecureResource(src);
+const SecureVideo: React.FC<{ src: string; fetchFile: FetchFileFn }> = ({ src, fetchFile }) => {
+  const { objectUrl, loading, progress, error } = useSecureResource(src, fetchFile);
 
   if (loading) return (
     <div className="w-full aspect-video bg-gray-900 rounded-lg flex flex-col items-center justify-center text-gray-400 space-y-3">
@@ -143,7 +134,7 @@ const SecureVideo: React.FC<{ src: string }> = ({ src }) => {
   );
 };
 
-// --- 可视化/编辑组件 ---
+// --- Storyboard ---
 
 interface StoryboardProps {
   data: StoryData;
@@ -151,9 +142,10 @@ interface StoryboardProps {
   onSave?: (newData: StoryData) => Promise<void>;
   audioUrls?: string[]; 
   imageUrls?: string[];
+  fetchFile: FetchFileFn; 
 }
 
-const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audioUrls, imageUrls }) => {
+const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audioUrls, imageUrls, fetchFile }) => {
   const [localData, setLocalData] = useState<StoryData>(data);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -263,7 +255,7 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
                       <div className="mt-auto">
                         {relatedImageUrl ? (
                           <div className="overflow-hidden rounded-md border border-purple-200/50 shadow-sm bg-white">
-                            <SecureImage src={relatedImageUrl} />
+                            <SecureImage src={relatedImageUrl} fetchFile={fetchFile} />
                           </div>
                         ) : (
                           page.image_prompt && (
@@ -308,7 +300,7 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
                                     <span className="text-green-500 mt-0.5">•</span>
                                     <span className="font-medium leading-relaxed">{seg}</span>
                                   </div>
-                                  {audioUrl && <InlineAudioPlayer src={audioUrl} />}
+                                  {audioUrl && <InlineAudioPlayer src={audioUrl} fetchFile={fetchFile} />}
                                 </li>
                               );
                             }) : (
@@ -329,54 +321,65 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
   );
 };
 
-// --- 主容器 ---
+// --- Main Container ---
 
-const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = 'story', onResourceUpdate }) => {
+const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = 'story', onResourceUpdate, fetchFile, fetchSegmentResources }) => {
   const [jsonContent, setJsonContent] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [speechContextData, setSpeechContextData] = useState<any>(null);
   const [images, setImages] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    // @ts-ignore
+    let active = true;
+    setLoadError(null);
+    
     const type = taskMode === 'videogen' ? VIDEOGEN_SEGMENT_TYPE_MAP[segmentId] : SEGMENT_TYPE_MAP[segmentId];
     
     if (type === 'story_json' || type === 'split_json') {
       if (urls[0]) {
         setLoading(true);
-        api.get('/resource', { params: { url: urls[0] } })
-          .then(res => setJsonContent(res.data))
-          .catch(console.error)
-          .finally(() => setLoading(false));
+        fetchFile(urls[0], 'json')
+          .then(data => { if (active) setJsonContent(data); })
+          .catch(err => { 
+            console.error(err);
+            if (active) setLoadError("加载故事脚本失败，请稍后重试");
+          })
+          .finally(() => { if (active) setLoading(false); });
+      } else {
+        setLoading(false);
       }
     }
 
-    if (type === 'audio') {
+    if (type === 'audio' && fetchSegmentResources) {
       setLoading(true);
-      taskApi.getResource(taskId, 3)
-        .then(async (res) => {
-           if (res.data.urls && res.data.urls[0]) {
-             const jsonRes = await api.get('/resource', { params: { url: res.data.urls[0] } });
-             setSpeechContextData(jsonRes.data);
+      fetchSegmentResources(3)
+        .then(async (urls) => {
+           if (active && urls && urls[0]) {
+             const data = await fetchFile(urls[0], 'json');
+             if (active) setSpeechContextData(data);
            }
         })
         .catch(err => console.warn("无法获取 Speech 的文本上下文", err))
-        .finally(() => setLoading(false));
+        .finally(() => { if (active) setLoading(false); });
     }
 
-    if (['story_json', 'split_json', 'audio'].includes(type)) {
-      taskApi.getResource(taskId, 2)
-        .then(res => {
-          if (res.data.urls && res.data.urls.length > 0) {
-            setImages(res.data.urls);
+    if (['story_json', 'split_json', 'audio'].includes(type) && fetchSegmentResources) {
+      fetchSegmentResources(2)
+        .then(urls => {
+          if (active && urls && urls.length > 0) {
+            setImages(urls);
           }
         })
-        .catch(() => {
-          setImages([]);
-        });
+        .catch(() => setImages([]));
+    }
+    
+    if (!['story_json', 'split_json', 'audio'].includes(type)) {
+      setLoading(false);
     }
 
-  }, [taskId, segmentId, urls, taskMode]);
+    return () => { active = false; };
+  }, [taskId, segmentId, urls, taskMode, fetchFile, fetchSegmentResources]);
 
   const handleUpdateResource = async (newData: StoryData) => {
     try {
@@ -402,31 +405,38 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
   const type = taskMode === 'videogen' ? (VIDEOGEN_SEGMENT_TYPE_MAP[segmentId] || 'unknown') : SEGMENT_TYPE_MAP[segmentId];
 
   if (loading) return <div className="p-10 text-center text-gray-400">加载资源中...</div>;
+  
+  if (loadError) return <div className="p-8 text-center text-red-400">{loadError}</div>;
 
-  if (type === 'story_json' && isStoryData(jsonContent)) {
-    return <StoryboardViewer data={jsonContent} mode="edit-story" onSave={handleUpdateResource} imageUrls={images} />;
+  if (type === 'story_json') {
+    if (isStoryData(jsonContent)) {
+      return <StoryboardViewer data={jsonContent} mode="edit-story" onSave={handleUpdateResource} imageUrls={images} fetchFile={fetchFile} />;
+    }
+    return <div className="p-8 text-center text-gray-400">暂无故事数据</div>;
   }
 
-  if (type === 'split_json' && isStoryData(jsonContent)) {
-    return <StoryboardViewer data={jsonContent} mode="edit-split" onSave={handleUpdateResource} imageUrls={images} />;
+  if (type === 'split_json') {
+    if (isStoryData(jsonContent)) {
+      return <StoryboardViewer data={jsonContent} mode="edit-split" onSave={handleUpdateResource} imageUrls={images} fetchFile={fetchFile} />;
+    }
+    return <div className="p-8 text-center text-gray-400">暂无分镜数据</div>;
   }
 
-  if (type === 'audio' && isStoryData(speechContextData)) {
-    return <StoryboardViewer data={speechContextData} mode="speech" audioUrls={urls} imageUrls={images} />;
+  if (type === 'audio') {
+    if (isStoryData(speechContextData)) {
+      return <StoryboardViewer data={speechContextData} mode="speech" audioUrls={urls} imageUrls={images} fetchFile={fetchFile} />;
+    }
+    return <div className="p-8 space-y-2">{urls.map((url, i) => <InlineAudioPlayer key={i} src={url} fetchFile={fetchFile} />)}</div>;
   }
 
   return (
     <div className="p-8">
-      {type === 'audio' && (
-        <div className="space-y-2">{urls.map((url, i) => <InlineAudioPlayer key={i} src={url} />)}</div>
-      )}
-
       {type === 'image' && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">{urls.map((url, i) => <SecureImage key={i} src={url} />)}</div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">{urls.map((url, i) => <SecureImage key={i} src={url} fetchFile={fetchFile} />)}</div>
       )}
 
       {type === 'video' && (
-        <div className="space-y-4">{urls.map((url, i) => <SecureVideo key={i} src={url} />)}</div>
+        <div className="space-y-4">{urls.map((url, i) => <SecureVideo key={i} src={url} fetchFile={fetchFile} />)}</div>
       )}
       
       {![ 'story_json', 'split_json', 'audio', 'image', 'video'].includes(type) && (
