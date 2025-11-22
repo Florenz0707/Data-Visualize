@@ -3,6 +3,7 @@ import mimetypes
 import shutil
 from pathlib import Path
 from typing import List
+import logging
 
 import aiofiles
 from django.conf import settings
@@ -12,6 +13,7 @@ from django.db import transaction
 from django.http import HttpRequest, StreamingHttpResponse
 from ninja import NinjaAPI
 from ninja.errors import HttpError
+from typing import Optional
 
 from .auth import (
     create_access_token, create_refresh_token,
@@ -21,10 +23,11 @@ from .models import Task, TaskSegment, Resource, WorkflowDefinition
 from .schemas import (
     RegisterIn, RegisterOut, LoginIn, LoginOut,
     WorkflowItem, TaskNewIn, TaskNewOut, TaskProgressOut,
-    TaskListOut, ExecuteOut,
+    TaskListOut, ExecuteOut, T2VExecuteIn,
 )
 
 api = NinjaAPI(title="MM-StoryAgent Backend")
+logger = logging.getLogger("django")
 
 
 # --- Helpers for redo semantics ---
@@ -97,30 +100,53 @@ def _prepare_redo(task: Task, start_segment: int) -> None:
 def download_resource(request: HttpRequest, url: str):
     user = auth_from_header(request.headers.get("Authorization"))
     if not user:
+        logger.warning("/api/resource unauthorized: missing/invalid token")
         raise HttpError(401, "Unauthorized")
 
     try:
         rel = Path(url)
     except Exception:
+        logger.warning("/api/resource invalid url param: %r", url)
         raise HttpError(400, "Invalid url")
     if rel.is_absolute() or ".." in rel.parts:
+        logger.warning("/api/resource rejected absolute or traversal url: %r parts=%s", url, rel.parts)
         raise HttpError(400, "Invalid url")
 
+    # Compute base/abs for potential fallbacks
+    base_dir = Path(settings.BASE_DIR).resolve()
+    abs_path = (base_dir / rel).resolve()
+
+    # DB lookup (exact relative first)
     res_qs = Resource.objects.filter(path=str(rel), task__user=user)
     if not res_qs.exists():
-        raise HttpError(404, "Resource not found")
+        # Try absolute path variant (for legacy rows that stored abs paths)
+        abs_qs = Resource.objects.filter(path=str(abs_path), task__user=user)
+        if abs_qs.exists():
+            res_qs = abs_qs
+        else:
+            # As a last resort, try suffix match under same user
+            suffix_qs = Resource.objects.filter(path__endswith=str(rel), task__user=user)
+            if suffix_qs.exists():
+                res_qs = suffix_qs
+            else:
+                # Extra diagnostics: try to locate nearby matches for same user task
+                similar = list(Resource.objects.filter(path__icontains=rel.name, task__user=user).values_list("path", flat=True)[:5])
+                logger.warning("/api/resource not found in DB: user=%s url=%s similar_candidates=%s", user.id, str(rel), similar)
+                raise HttpError(404, "Resource not found")
+
     res = res_qs.select_related("task").order_by("-id").first()
     task = res.task
 
     story_dir = Path(task.story_dir).resolve()
-    base_dir = Path(settings.BASE_DIR).resolve()
-    abs_path = (base_dir / rel).resolve()
 
+    # Filesystem & containment check
     try:
         if not abs_path.is_file() or not abs_path.is_relative_to(story_dir):
+            logger.warning("/api/resource file missing or outside story_dir: file=%s story_dir=%s exists=%s", abs_path, story_dir, abs_path.exists())
             raise ValueError
     except AttributeError:
         if not abs_path.is_file() or str(abs_path).find(str(story_dir)) != 0:
+            logger.warning("/api/resource forbidden path: file=%s story_dir=%s exists=%s", abs_path, story_dir, abs_path.exists())
             raise HttpError(403, "Forbidden")
 
     async def _iter_file_async(path: Path, chunk_size: int = 8192):
@@ -134,6 +160,7 @@ def download_resource(request: HttpRequest, url: str):
     mime, _ = mimetypes.guess_type(str(abs_path))
     resp = StreamingHttpResponse(_iter_file_async(abs_path), content_type=mime or "application/octet-stream")
     resp["Content-Disposition"] = f'attachment; filename="{abs_path.name}"'
+    logger.info("/api/resource success: user=%s task=%s url=%s file=%s", user.id, task.id, str(rel), str(abs_path))
     return resp
 
 
@@ -195,6 +222,7 @@ def require_user(request: HttpRequest) -> User:
 @api.post("/task/new", response={200: TaskNewOut})
 def task_new(request: HttpRequest, payload: TaskNewIn):
     user = require_user(request)
+    wf_ver = (payload.workflow_version or "default").strip().lower()
     task = Task.objects.create(
         user=user,
         topic=payload.topic,
@@ -202,10 +230,14 @@ def task_new(request: HttpRequest, payload: TaskNewIn):
         scene=payload.scene or "",
         status="pending",
         current_segment=0,
+        workflow_version=wf_ver or "default",
     )
     task.ensure_story_dir()
-    for segment in WorkflowDefinition.get_active_segments():
-        TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending")
+    if wf_ver == "videogen":
+        TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+    else:
+        for segment in WorkflowDefinition.get_active_segments():
+            TaskSegment.objects.create(task=task, segment_id=segment["id"], name=segment["name"], status="pending")
     return TaskNewOut(task_id=task.id)
 
 
@@ -299,6 +331,76 @@ def execute_segment(request: HttpRequest, task_id: int, segmentId: int, redo: bo
             seg.started_at = timezone.now()
         seg.error_message = ""
         seg.save(update_fields=["status", "started_at", "error_message"])
+        if task.status in ("pending", "failed"):
+            task.status = "running"
+            task.save(update_fields=["status"])
+        from .tasks import execute_task_segment
+        async_res = execute_task_segment.delay(task.id, segmentId)
+        async_id = async_res.id
+
+    data = ExecuteOut(accepted=True, celery_task_id=async_id, message="Execution queued")
+    return api.create_response(request, data.model_dump(), status=202)
+
+
+# --- Convenience endpoints for direct T2V (videogen) workflow ---
+@api.post("/videogen/new", response={200: TaskNewOut})
+def videogen_new(request: HttpRequest, payload: TaskNewIn):
+    user = require_user(request)
+    task = Task.objects.create(
+        user=user,
+        topic=payload.topic,  # used as prompt
+        main_role=payload.main_role or "",
+        scene=payload.scene or "",
+        status="pending",
+        current_segment=0,
+        workflow_version="videogen",
+    )
+    task.ensure_story_dir()
+    TaskSegment.objects.create(task=task, segment_id=1, name="VideoGen", status="pending")
+    return TaskNewOut(task_id=task.id)
+
+
+@api.post("/videogen/{task_id}/execute", response={200: ExecuteOut})
+def videogen_execute(request: HttpRequest, task_id: int, payload: Optional[T2VExecuteIn] = None, redo: bool = False):
+    from django.utils import timezone
+    user = require_user(request)
+    task = Task.objects.filter(id=task_id, user=user).first()
+    if not task:
+        raise HttpError(404, "Task not found")
+    if (task.workflow_version or "default").lower() != "videogen":
+        raise HttpError(400, "Not a videogen task")
+
+    segmentId = 1
+    if redo and segmentId <= task.current_segment:
+        running_exists = task.segments.filter(status="running").exists()
+        if running_exists:
+            raise HttpError(409, "Task is running, retry later")
+        _prepare_redo(task, segmentId)
+        task.refresh_from_db()
+
+    if segmentId != task.current_segment + 1:
+        raise HttpError(400, "Segment cannot be executed out of order")
+
+    task.ensure_story_dir()
+    seg = task.segments.filter(segment_id=segmentId).first()
+    if not seg:
+        raise HttpError(400, "Unknown segment")
+
+    # Merge overrides into metadata_json for the worker to pick up
+    if payload is not None:
+        meta = seg.metadata_json or {}
+        for k, v in payload.model_dump(exclude_none=True).items():
+            meta[k] = v
+        seg.metadata_json = meta
+
+    if seg.status == "running":
+        async_id = None
+    else:
+        seg.status = "running"
+        if not seg.started_at:
+            seg.started_at = timezone.now()
+        seg.error_message = ""
+        seg.save(update_fields=["status", "started_at", "error_message", "metadata_json"])
         if task.status in ("pending", "failed"):
             task.status = "running"
             task.save(update_fields=["status"])

@@ -147,7 +147,53 @@ DELETE /api/task/{task_id}（鉴权）
 
 ---
 
-## 4. 提示 & 安全
+## 4. 文本转视频（独立工作流 videogen）
+
+说明
+- 该工作流与默认 5 段流程独立，直接从长文本或图片生成视频（单段）。
+- 可选两种入口：
+  1) 便捷入口：/api/videogen/new 与 /api/videogen/{task_id}/execute
+  2) 通用入口：/api/task/new 时传 workflow_version="videogen"，随后 /api/task/{task_id}/execute/1 执行
+
+### 4.1 创建 videogen 任务
+POST /api/videogen/new（鉴权）
+
+请求体
+```json
+{ "topic": "作为 prompt 的长文本描述", "main_role": "可选", "scene": "可选" }
+```
+响应 200
+```json
+{ "task_id": 123 }
+```
+
+说明：topic 字段将作为视频生成的文本提示（prompt）。
+
+### 4.2 执行 videogen
+POST /api/videogen/{task_id}/execute（鉴权）
+
+说明
+- 无请求体：直接使用创建任务时的参数（topic 作为 prompt；其余参数来自配置 t2v_generation.params）
+- 可重做：POST /api/videogen/{task_id}/execute?redo=true
+- 执行为异步，返回 202：
+```json
+{ "accepted": true, "celery_task_id": "string|null", "message": "Execution queued" }
+```
+
+### 4.3 资源获取
+- 列表：GET /api/task/{task_id}/resource?segmentId=1（鉴权）
+- 下载：GET /api/resource?url=<相对路径>（鉴权）
+
+### 4.4 通过通用入口创建 videogen（可选）
+POST /api/task/new（鉴权）
+```json
+{ "topic": "string", "workflow_version": "videogen" }
+```
+随后执行：POST /api/task/{task_id}/execute/1
+
+---
+
+## 5. 提示 & 安全
 - 资源路径为相对路径；不要传入绝对路径。服务端会校验归属与路径安全。
 - redo=true 时，会删除相应环节之后的产物并重置状态，再从该环节重新执行。
 - 可结合 WebSocket/Redis 订阅完成/失败通知，或通过 /progress 与 /resource 輪询。

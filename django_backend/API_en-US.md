@@ -148,12 +148,58 @@ Response 200
 
 ---
 
-## 4. Notifications (optional)
+## 4. Text-to-Video (Standalone Workflow: videogen)
+
+Overview
+- Independent from the default 5-step workflow. Single-step video generation from long text or an input image.
+- Two entry styles:
+  1) Convenience: /api/videogen/new and /api/videogen/{task_id}/execute
+  2) Generic: /api/task/new with workflow_version="videogen"; then /api/task/{task_id}/execute/1
+
+### 4.1 Create videogen task
+POST /api/videogen/new (auth)
+
+Request
+```json
+{ "topic": "Prompt text for direct video generation", "main_role": "optional", "scene": "optional" }
+```
+Response 200
+```json
+{ "task_id": 123 }
+```
+
+Note: topic is used as the prompt.
+
+### 4.2 Execute videogen
+POST /api/videogen/{task_id}/execute (auth)
+
+Behavior
+- No request body: the execution uses parameters defined at task creation (topic as prompt; other params from t2v_generation.params).
+- Redo: POST /api/videogen/{task_id}/execute?redo=true
+- Asynchronous execution, returns 202:
+```json
+{ "accepted": true, "celery_task_id": "string|null", "message": "Execution queued" }
+```
+
+### 4.3 Fetch resources
+- List: GET /api/task/{task_id}/resource?segmentId=1 (auth)
+- Download: GET /api/resource?url=<relative_path> (auth)
+
+### 4.4 Generic entry to videogen (optional)
+POST /api/task/new (auth)
+```json
+{ "topic": "string", "workflow_version": "videogen" }
+```
+Then execute: POST /api/task/{task_id}/execute/1
+
+---
+
+## 5. Notifications (optional)
 - The system may broadcast per-segment completion/failure via WebSocket/Redis PubSub (implementation detail). Clients can poll /progress and /task/{id}/resource alternatively.
 
 ---
 
-## 5. Examples
+## 6. Examples
 
 ```bash
 ACCESS=<token>

@@ -14,7 +14,7 @@ story_writer:
         max_conv_turns: 3
         num_outline: 4
         temperature: 0.5
-        max_pages: 3  # 最大页面数（用于测试）
+        max_pages: 10  # 最大页面数（用于测试）
     params:
         story_topic: "Magnet Mania - Introduction to magnets and how they work."
         main_role: "(no role specified)"
@@ -24,7 +24,7 @@ story_writer:
 # ==================== 文本切分 ====================
 text_split:
     params:
-        max_chars: 80
+        max_chars: 100
         # Post-merge thresholds to avoid overly short segments
         min_chars_per_segment: 15
         min_words_per_segment: 3
@@ -61,6 +61,19 @@ image_generation:
         # 'Black and White Film Noir', 'Isometric Rooms', 'Storybook'
 
 
+# ==================== 文本转视频（Runway） ====================
+t2v_generation:
+    tool: runway_t2v
+    model: runway_veo3.1
+    cfg: {}
+    params:
+        # 可被运行时覆盖
+        width: 1280
+        height: 720
+        fps: 24
+        duration: 8           # 秒
+        use_mock: false       # 开发阶段默认 true 生成占位视频；生产可改为 false
+
 # ==================== 视频合成 ====================
 video_compose:
     tool: slideshow_video_compose
@@ -87,7 +100,7 @@ video_compose:
         caption:
             font: resource/font/FiraCode-Regular.ttf
             # bg_color: LightGrey
-            fontsize: 22
+            fontsize: 24
             color: white
             # stroke_color: white
             # stroke_width: 0.5

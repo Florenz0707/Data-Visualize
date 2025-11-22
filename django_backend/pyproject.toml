@@ -32,6 +32,7 @@ dependencies = [
     "uvicorn[standard]>=0.38.0",
     "spacy>=3.8.9",
     "aiofiles>=24.1.0",
+    "runwayml>=4.1.0",
 ]
 
 [tool.uv.sources]

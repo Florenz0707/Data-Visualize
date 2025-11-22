@@ -29,9 +29,10 @@ class WorkflowItem(BaseModel):
 
 
 class TaskNewIn(BaseModel):
-    topic: str
+    topic: str  # For videogen, this serves as the prompt
     main_role: Optional[str] = ""
     scene: Optional[str] = ""
+    workflow_version: Optional[str] = "default"  # "default" or "videogen"
 
 
 class TaskNewOut(BaseModel):
@@ -55,3 +56,16 @@ class ExecuteOut(BaseModel):
     accepted: bool
     celery_task_id: Optional[str] = None
     message: str = ""
+
+
+class T2VExecuteIn(BaseModel):
+    prompt: Optional[str] = None
+    model: Optional[str] = None         # e.g., "runway_gen4_turbo" or provider-native like "gen4_turbo"
+    ratio: Optional[str] = None         # e.g., "1280:720"
+    prompt_image_path: Optional[str] = None
+    prompt_image_data_uri: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    fps: Optional[int] = None
+    duration: Optional[float] = None
+    use_mock: Optional[bool] = None

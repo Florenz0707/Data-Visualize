@@ -194,7 +194,7 @@ class WorkflowRunner:
         wavs = sorted([str(p) for p in (Path(story_dir) / "speech").glob("s*.wav")])
         return wavs
 
-    # ========== Segment 5: Video ==========
+    # ========== Segment 5: Video (slideshow compose) ==========
     def run_video(self, story_dir: str | Path, pages: List[str] | None = None,
                   segmented_pages: List[List[str]] | None = None) -> str:
         story_dir = self._story_dir(story_dir)
@@ -242,3 +242,20 @@ class WorkflowRunner:
             params["segmented_pages"] = segmented_pages
         agent.call(params)
         return str(Path(story_dir) / "output.mp4")
+
+    # ========== T2V: Direct text-to-video via provider (Runway) ==========
+    def run_video_t2v(self, story_dir: str | Path, prompt: str, overrides: Dict | None = None) -> str:
+        story_dir = self._story_dir(story_dir)
+        # Load t2v_generation config
+        t2v_cfg = dict(self.base_cfg.get("t2v_generation") or {})
+        if not t2v_cfg:
+            raise RuntimeError("t2v_generation config missing in mm_story_agent.yaml")
+        # Merge model config
+        merged_cfg = load_model_for_agent(t2v_cfg, 'video')
+        agent = init_tool_instance({"tool": t2v_cfg["tool"], "cfg": merged_cfg})
+        params = dict(t2v_cfg.get("params") or {})
+        params["story_dir"] = str(Path(story_dir))
+        params["prompt"] = prompt or ""
+        if overrides:
+            params.update(overrides)
+        return agent.call(params)

@@ -80,30 +80,38 @@ def execute_task_segment(self, task_id: int, segment_id: int):
         created_resources: List[str] = []
         rtype = None
         # Segment execution
-        if segment_id == 1:
-            runner.run_story(story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene)
-            script_path = str(Path(story_dir) / "script_data.json")
-            created_resources = [script_path]
-            rtype = "json"
-        elif segment_id == 2:
-            images = runner.run_image(story_dir)
-            created_resources = images
-            rtype = "image"
-        elif segment_id == 3:
-            runner.run_split(story_dir)
-            script_path = str(Path(story_dir) / "script_data.json")
-            created_resources = [script_path]
-            rtype = "json"
-        elif segment_id == 4:
-            wavs = runner.run_speech(story_dir)
-            created_resources = wavs
-            rtype = "audio"
-        elif segment_id == 5:
-            video = runner.run_video(story_dir)
+        if (task.workflow_version or "default").lower() == "videogen":
+            if segment_id != 1:
+                raise ValueError("Unknown segment for videogen workflow")
+            # Use only task creation parameters (topic as prompt), no per-execution overrides
+            video = runner.run_video_t2v(story_dir, prompt=task.topic, overrides=None)
             created_resources = [video]
             rtype = "video"
         else:
-            raise ValueError("Unknown segment")
+            if segment_id == 1:
+                runner.run_story(story_dir, topic=task.topic, main_role=task.main_role, scene=task.scene)
+                script_path = str(Path(story_dir) / "script_data.json")
+                created_resources = [script_path]
+                rtype = "json"
+            elif segment_id == 2:
+                images = runner.run_image(story_dir)
+                created_resources = images
+                rtype = "image"
+            elif segment_id == 3:
+                runner.run_split(story_dir)
+                script_path = str(Path(story_dir) / "script_data.json")
+                created_resources = [script_path]
+                rtype = "json"
+            elif segment_id == 4:
+                wavs = runner.run_speech(story_dir)
+                created_resources = wavs
+                rtype = "audio"
+            elif segment_id == 5:
+                video = runner.run_video(story_dir)
+                created_resources = [video]
+                rtype = "video"
+            else:
+                raise ValueError("Unknown segment")
 
         with transaction.atomic():
             # Reload current objects under lock and persist results
