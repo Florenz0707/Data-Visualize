@@ -27,30 +27,65 @@ function isStoryData(data: any): data is StoryData {
 const useSecureResource = (url: string) => {
   const [objectUrl, setObjectUrl] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     let currentUrl = '';
+    
     const fetchResource = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/resource', { params: { url }, responseType: 'blob' });
+        setProgress(0);
+        setError(null);
+
+        const response = await api.get('/resource', { 
+          params: { url }, 
+          responseType: 'blob',
+
+          onDownloadProgress: (progressEvent) => {
+            if (active && progressEvent.total) {
+              const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+              setProgress(percent);
+            }
+          }
+        });
+
         if (active) {
           const blobUrl = URL.createObjectURL(response.data);
           currentUrl = blobUrl;
           setObjectUrl(blobUrl);
         }
-      } catch (e) {
-        if (active) setLoading(false);
+      } catch (e: any) {
+        console.error("Resource load failed", e);
+        if (active) {
+          if (e.response?.data instanceof Blob) {
+            const text = await e.response.data.text();
+            try {
+              const json = JSON.parse(text);
+              setError(json.detail || "资源加载失败");
+            } catch {
+              setError("资源加载失败");
+            }
+          } else {
+            setError("网络请求失败");
+          }
+        }
       } finally {
         if (active) setLoading(false);
       }
     };
+
     if (url) fetchResource();
-    return () => { active = false; if (currentUrl) URL.revokeObjectURL(currentUrl); };
+    
+    return () => { 
+      active = false; 
+      if (currentUrl) URL.revokeObjectURL(currentUrl); 
+    };
   }, [url]);
 
-  return { objectUrl, loading };
+  return { objectUrl, loading, progress, error };
 };
 
 // 音频播放小组件
@@ -76,9 +111,36 @@ const SecureImage: React.FC<{ src: string }> = ({ src }) => {
 };
 
 const SecureVideo: React.FC<{ src: string }> = ({ src }) => {
-  const { objectUrl, loading } = useSecureResource(src);
-  if (loading) return <div className="w-full aspect-video bg-gray-800 rounded-lg animate-pulse flex items-center justify-center text-gray-400">加载视频中...</div>;
-  return <video controls className="w-full rounded-lg shadow-xl bg-black aspect-video" src={objectUrl} />;
+  const { objectUrl, loading, progress, error } = useSecureResource(src);
+
+  if (loading) return (
+    <div className="w-full aspect-video bg-gray-900 rounded-lg flex flex-col items-center justify-center text-gray-400 space-y-3">
+      <div className="w-10 h-10 border-2 border-gray-600 border-t-blue-500 rounded-full animate-spin"></div>
+      <div className="text-sm font-medium">视频加载中 {progress}%</div>
+      <div className="w-1/2 h-1 bg-gray-700 rounded-full overflow-hidden">
+        <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${progress}%` }}></div>
+      </div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="w-full aspect-video bg-gray-100 rounded-lg flex flex-col items-center justify-center text-red-400 border border-red-200">
+      <span className="text-2xl mb-2">⚠️</span>
+      <span>{error}</span>
+      <span className="text-xs text-gray-400 mt-1">无法播放此视频</span>
+    </div>
+  );
+
+  return (
+    <video 
+      controls 
+      className="w-full rounded-lg shadow-xl bg-black aspect-video" 
+      src={objectUrl} 
+      playsInline
+    >
+      您的浏览器不支持视频播放
+    </video>
+  );
 };
 
 // --- 可视化/编辑组件 ---
@@ -154,7 +216,6 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
         {localData.pages.map((page, index) => {
           const segments = localData.segmented_pages?.[index] || [];
           const sceneNum = index + 1;
-          
           const relatedImageUrl = imageUrls && imageUrls[index];
 
           return (
@@ -184,13 +245,11 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
                   <div className="flex flex-col h-full">
-                    {/* Image Prompt Section */}
                     <div className="bg-purple-50 p-5 rounded-lg border border-purple-100 h-full flex flex-col min-h-[200px]">
                       <h4 className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-3 flex items-center gap-2 shrink-0">
                         <span>🎨</span> Image Prompt
                       </h4>
                       
-                      {/* 文字描述 */}
                       {page.image_prompt ? (
                         <p className="text-gray-600 text-sm italic leading-relaxed mb-4">
                           {page.image_prompt}
@@ -201,7 +260,6 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
                         </div>
                       )}
 
-                      {/* 图片展示区域 (推到底部) */}
                       <div className="mt-auto">
                         {relatedImageUrl ? (
                           <div className="overflow-hidden rounded-md border border-purple-200/50 shadow-sm bg-white">
@@ -219,7 +277,6 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
                   </div>
 
                   <div className="flex flex-col h-full">
-                    {/* Split/Speech Section */}
                     <div className="bg-green-50 p-5 rounded-lg border border-green-100 h-full flex flex-col min-h-[200px]">
                       <h4 className="text-xs font-bold text-green-600 uppercase tracking-wider mb-3 shrink-0 flex items-center gap-2">
                         {mode === 'speech' ? <span>🎙️ Speech & Audio</span> : <span>📝 Split Segments</span>}
@@ -278,7 +335,6 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
   const [jsonContent, setJsonContent] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [speechContextData, setSpeechContextData] = useState<any>(null);
-  
   const [images, setImages] = useState<string[]>([]);
 
   useEffect(() => {
@@ -347,7 +403,6 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
 
   if (loading) return <div className="p-10 text-center text-gray-400">加载资源中...</div>;
 
-  // 1. Storyboard (传入 imageUrls)
   if (type === 'story_json' && isStoryData(jsonContent)) {
     return <StoryboardViewer data={jsonContent} mode="edit-story" onSave={handleUpdateResource} imageUrls={images} />;
   }
@@ -360,7 +415,6 @@ const ResourceViewer: React.FC<Props> = ({ taskId, segmentId, urls, taskMode = '
     return <StoryboardViewer data={speechContextData} mode="speech" audioUrls={urls} imageUrls={images} />;
   }
 
-  // 2. 其他资源
   return (
     <div className="p-8">
       {type === 'audio' && (

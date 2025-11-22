@@ -24,6 +24,14 @@ const TaskWorkspace: React.FC = () => {
   const timerRef = useRef<number | undefined>(undefined);
   const autoStartRef = useRef(false);
 
+  const getCompletedSegId = useCallback((p: TaskProgress | null) => {
+    if (!p) return 0;
+    if (p.status === TaskStatusEnum.COMPLETED) {
+      return p.total_segments || (workflow.length > 0 ? workflow.length : p.current_segment);
+    }
+    return p.current_segment;
+  }, [workflow.length]);
+
   // 1. 核心数据获取逻辑
   const fetchProgress = useCallback(async () => {
     if (!taskId) return;
@@ -56,7 +64,7 @@ const TaskWorkspace: React.FC = () => {
     }
   }, [taskId, workflow.length, taskMode]);
 
-  // 2. 初始化：挂载时立即获取进度和元数据
+  // 2. 初始化
   useEffect(() => {
     fetchProgress();
     return () => clearTimeout(timerRef.current);
@@ -86,13 +94,14 @@ const TaskWorkspace: React.FC = () => {
   // 5. 自动切换资源逻辑
   useEffect(() => {
     if (!taskId || !viewingSegmentId) return;
-    const completedSegId = progress ? progress.current_segment : 0;
+    const completedSegId = getCompletedSegId(progress);
+    
     if (viewingSegmentId <= completedSegId) {
        loadResources(viewingSegmentId);
     } else {
       setResources([]);
     }
-  }, [taskId, viewingSegmentId, progress, loadResources]);
+  }, [taskId, viewingSegmentId, progress, loadResources, getCompletedSegId]);
 
   const executeStep = async (segId: number, redo: boolean = false) => {
     if (!taskId) return;
@@ -114,13 +123,13 @@ const TaskWorkspace: React.FC = () => {
     if (viewingSegmentId) loadResources(viewingSegmentId);
   };
 
-  // 6. 自动开始逻辑 (确保已初始化)
+  // 6. 自动开始逻辑
   useEffect(() => {
     const autoStart = location.state?.autoStart;
     if (autoStart && !autoStartRef.current && isInitialized && progress) {
-        const completedSegId = progress.current_segment;
+        const rawCompletedSegId = progress.current_segment;
         
-        if (completedSegId === 0 && progress.status === TaskStatusEnum.PENDING && workflow.length > 0) {
+        if (rawCompletedSegId === 0 && progress.status === TaskStatusEnum.PENDING && workflow.length > 0) {
             autoStartRef.current = true;
             const firstStepId = workflow[0].id;
             setViewingSegmentId(firstStepId);
@@ -131,7 +140,7 @@ const TaskWorkspace: React.FC = () => {
 
   if (!taskId) return <div>Invalid Task ID</div>;
 
-  const completedSegId = progress ? progress.current_segment : 0;
+  const completedSegId = getCompletedSegId(progress);
   const taskStatus = progress?.status;
 
   const nextStepId = completedSegId + 1;
