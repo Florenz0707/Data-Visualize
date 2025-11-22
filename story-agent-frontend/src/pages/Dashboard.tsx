@@ -6,10 +6,14 @@ import { useAuth } from '../context/AuthContext';
 const Dashboard: React.FC = () => {
   const [tasks, setTasks] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
+  
   const [newTopic, setNewTopic] = useState('');
   const [role, setRole] = useState('');
   const [scene, setScene] = useState('');
+  const [description, setDescription] = useState('');
+  
   const [taskMode, setTaskMode] = useState<'story' | 'videogen'>('story');
+
   const { logout } = useAuth();
   const navigate = useNavigate();
 
@@ -29,17 +33,22 @@ const Dashboard: React.FC = () => {
   const handleCreate = async () => {
     if (!newTopic) return;
     try {
-      // 构造请求参数，如果是 videogen 模式，带上 workflow_version
       const payload = {
         topic: newTopic,
         main_role: role,
         scene: scene,
+        description: description,
         workflow_version: taskMode === 'videogen' ? 'videogen' : undefined
       };
 
       const { data } = await taskApi.create(payload);
       setShowModal(false);
       
+      setNewTopic('');
+      setRole('');
+      setScene('');
+      setDescription('');
+
       const queryType = taskMode === 'videogen' ? '?type=videogen' : '';
       navigate(`/task/${data.task_id}${queryType}`, { state: { autoStart: true } });
     } catch (error) {
@@ -79,9 +88,6 @@ const Dashboard: React.FC = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {tasks.map((taskId) => (
-            // 注意：列表页无法直接区分任务类型，默认点击进入故事模式。
-            // 实际上用户可以在详情页发现不对时手动切模式，或者我们依赖用户记忆。
-            // 理想情况是后端列表接口返回任务类型，目前不做修改。
             <Link key={taskId} to={`/task/${taskId}`} className="block group relative">
               <div className="bg-white p-6 rounded-lg shadow-sm hover:shadow-md transition border border-gray-200 group-hover:border-blue-300">
                 <div className="flex justify-between items-start mb-2">
@@ -151,6 +157,13 @@ const Dashboard: React.FC = () => {
                 placeholder="场景 (选填)" 
                 value={scene} 
                 onChange={e => setScene(e.target.value)} 
+              />
+              <textarea 
+                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none" 
+                placeholder="详细描述 (选填)" 
+                value={description}
+                rows={3}
+                onChange={e => setDescription(e.target.value)} 
               />
             </div>
             <div className="flex justify-end gap-2 mt-6">
