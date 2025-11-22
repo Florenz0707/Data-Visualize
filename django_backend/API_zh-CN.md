@@ -145,6 +145,43 @@ DELETE /api/task/{task_id}（鉴权）
 { "deleted": true }
 ```
 
+
+### 3.8 用户资源上传（段 1/段 3 重做）
+PUT /api/task/{task_id}/myresource/{segmentId}（鉴权）
+
+说明
+- 仅默认 5 段工作流；videogen 不支持
+- 仅支持 segmentId ∈ {1, 3}
+- 行为相当于“重做”：写入用户提供的资源后，重置并标记该段完成，current_segment 设置为该段，后续段的产物被清理
+
+请求格式
+- application/json
+  - 段 1（Story）：
+    {
+      "pages": [ {"story":"第一页"}, {"story":"第二页"} ]
+    }
+    - 允许 pages 元素为字符串（自动规范为 {"story": "..."}）
+  - 段 3（Split）：
+    {
+      "segmented_pages": [ ["句1","句2"], ["句A","句B","句C"] ]
+    }
+    - segmented_pages 长度必须与 script_data.json 的 pages 数一致
+
+- multipart/form-data（上传 JSON 文件）
+  - file=@script_data.json
+  - mode=merge|replace（可选，默认 replace）
+    - 段 1：replace 覆盖 pages；merge 仅替换 pages，保留其他字段（并清理旧 segmented_pages）
+    - 段 3：总是合并到 script_data.json，仅更新 segmented_pages
+
+响应（成功 200）
+```json
+{ "segmentId": 1, "urls": ["generated_stories/<id>/script_data.json"], "message": "Resource updated and segment marked completed" }
+```
+
+常见错误
+- 400：segmentId 非 1/3、格式错误、长度不匹配、Content-Type 不支持
+- 401：未鉴权；403：无权限；404：任务不存在/缺少前置资源（段 3）；409：任务运行中
+
 ---
 
 ## 4. 文本转视频（独立工作流 videogen）
