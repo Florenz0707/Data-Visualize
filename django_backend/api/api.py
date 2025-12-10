@@ -470,9 +470,6 @@ def upload_myresource(request: HttpRequest, task_id: int, segmentId: int):
     if task.segments.filter(status="running").exists():
         raise HttpError(409, "Task is running, retry later")
 
-    story_dir = Path(task.ensure_story_dir())
-    script_path = story_dir / "script_data.json"
-
     # Parse body: JSON or multipart with file
     content_type = request.headers.get("Content-Type", "")
     payload_data = None
@@ -496,6 +493,13 @@ def upload_myresource(request: HttpRequest, task_id: int, segmentId: int):
         raise
     except Exception as e:
         raise HttpError(400, f"Invalid payload: {e}")
+
+    # Redo BEFORE writing to avoid deleting freshly written files
+    _prepare_redo(task, segmentId)
+
+    # Ensure story dir exists after redo
+    story_dir = Path(task.ensure_story_dir())
+    script_path = story_dir / "script_data.json"
 
     # Validate and write
     def _write_json_atomic(path: Path, data: dict):

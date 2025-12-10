@@ -12,11 +12,11 @@ story_writer:
     model: qwen3-max  # 使用的LLM模型（从models.yaml中选择）
     cfg:
         max_conv_turns: 3
-        num_outline: 4
-        temperature: 0.5
-        max_pages: 10  # 最大页面数（用于测试）
+        num_outline: 2
+        temperature: 0.7
+        max_pages: 3  # 最大页面数（用于测试）
     params:
-        story_topic: "null"
+        story_topic: ""
         main_role: "(no role specified)"
         scene: "(no scene specified)"
 
@@ -55,7 +55,7 @@ image_generation:
         width: &image_width 1280
     params:
         seed: 112536
-        style_name: "Storybook"
+        style_name: "Photographic"
         # 可选风格: '(No style)', 'Japanese Anime', 'Digital/Oil Painting',
         # 'Pixar/Disney Character', 'Photographic', 'Comic book', 'Line art',
         # 'Black and White Film Noir', 'Isometric Rooms', 'Storybook'
@@ -89,7 +89,7 @@ video_compose:
         fade_in: 0.2
         fade_out: 0.25
 
-        enable_ken_burns: true
+        enable_ken_burns: false
         kb_zoom_start: 1.0
         kb_zoom_end: 1.0
         kb_direction: lr  # lr|rl|tb|bt|center
@@ -102,7 +102,7 @@ video_compose:
         export_srt_on_burn: false
         caption:
             enable_captions: true  # 启用字幕（默认）
-            font: resource/font/FiraCode-Regular.ttf
+            font: Comic Sans MS
             # bg_color: LightGrey
             fontsize: 18
             color: white
@@ -110,7 +110,7 @@ video_compose:
             # stroke_width: 0.5
             workers: 4  # 并行字幕渲染线程数
         bgm_path: "resource/bgm/Summer.flac"
-        bgm_volume: 0.25  # Optional volume multiplier (0-1). Default 0.25 when mixing
+        bgm_volume: 1.0  # Optional volume multiplier (0-1). Default 0.25 when mixing
 
 
 # ==================== 可选：音乐生成 ====================

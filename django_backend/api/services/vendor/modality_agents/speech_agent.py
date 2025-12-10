@@ -278,7 +278,7 @@ class SpeechAgent:
         if segmented_pages is None:
             segmented_pages = []
             for page in pages:
-                text_segments = split_text_for_speech(page, max_words=25)
+                text_segments = split_text_for_speech(page, max_chars=60)
                 segmented_pages.append(text_segments)
 
         # Per-page naming: s{page}{idx}.wav (page starts at 1, idx starts at 1)

@@ -57,7 +57,7 @@ def timeout_context(seconds):
 
 
 # ---- Text split utility (also imported by other modules) ----
-def split_text_for_speech(text: str, max_chars: int = 60):
+def split_text_for_speech(text: str, max_chars: int = 60, **kwargs):
     import re as _re
     if not text or not text.strip():
         return []
@@ -728,7 +728,19 @@ class SlideshowVideoComposeAgent:
                     logger.info("[VideoCompose] wrote global SRT: %s (entries=%d)", srt_path, len(global_captions))
                     if burn_in_captions:
                         subbed = output.with_name(output.stem + "_sub.mp4")
-                        sub_filter = f"subtitles={srt_path.as_posix()}"
+                        # Build subtitles filter with fontsdir and force_style to ensure caption styles take effect
+                        try:
+                            fontsdir_abs = Path(fontsdir).resolve() if fontsdir else None
+                        except Exception:
+                            fontsdir_abs = None
+                        force_style = (
+                            f"FontName={fontname},FontSize={fontsize},Outline={outline:.2f},"
+                            f"Shadow={shadow:.2f},Alignment={alignment},MarginV={margin_v}"
+                        )
+                        if fontsdir_abs:
+                            sub_filter = f"subtitles='{srt_path.as_posix()}':fontsdir='{fontsdir_abs.as_posix()}':force_style='{force_style}'"
+                        else:
+                            sub_filter = f"subtitles='{srt_path.as_posix()}':force_style='{force_style}'"
                         run_ffmpeg([
                             ffmpeg_bin,
                             "-y",
@@ -740,6 +752,13 @@ class SlideshowVideoComposeAgent:
                             str(subbed)
                         ], "overlay_srt")
                         shutil.move(subbed, output)
+                        # Optionally remove SRT to avoid duplicate loading by players
+                        try:
+                            if not export_srt_on_burn and srt_path.exists():
+                                srt_path.unlink()
+                                logger.info("[VideoCompose] removed SRT after burn-in to avoid duplication: %s", srt_path)
+                        except Exception:
+                            pass
                 except Exception as exc:
                     logger.warning("[VideoCompose] failed to write/overlay SRT: %s", exc)
 
