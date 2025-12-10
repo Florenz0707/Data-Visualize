@@ -47,9 +47,9 @@ image_generation:
         width: &image_width 1280
     params:
         seed: 112536
-        style_name: "Japanese Anime" 
-        # 可选风格: '(No style)', 'Japanese Anime', 'Digital/Oil Painting', 
-        # 'Pixar/Disney Character', 'Photographic', 'Comic book', 'Line art', 
+        style_name: "Japanese Anime"
+        # 可选风格: '(No style)', 'Japanese Anime', 'Digital/Oil Painting',
+        # 'Pixar/Disney Character', 'Photographic', 'Comic book', 'Line art',
         # 'Black and White Film Noir', 'Isometric Rooms', 'Storybook'
 
 

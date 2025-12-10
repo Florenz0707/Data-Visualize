@@ -255,7 +255,7 @@ export MY_API_BASE="https://your-api-endpoint.com/v1"
 
 ### 问题: "Model 'xxx' not found"
 
-**解决方案**: 
+**解决方案**:
 - 检查模型名称是否在 `models.yaml` 中正确定义
 - 确保模型类型（llm/image/speech）与agent类型匹配
 
@@ -313,4 +313,3 @@ story_writer:
 - [OpenAI API 文档](https://platform.openai.com/docs/api-reference)
 - [Stability AI API 文档](https://platform.stability.ai/docs/api-reference)
 - [Replicate API 文档](https://replicate.com/docs)
-

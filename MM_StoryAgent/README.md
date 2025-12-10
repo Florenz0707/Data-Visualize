@@ -58,19 +58,19 @@ from mm_story_agent.base import register_tool
 
 @register_tool("my_speech_agent")
 class MySpeechAgent:
-    
+
     def __init__(self, cfg: Dict):
         # For example, the agent need `attr1` and `attr2` for initilization
         self.attr1 = cfg.attr1
         self.attr2 = cfg.attr2
         ...
-    
+
     def call(self, params: Dict):
         # For example, calling the agent needs `voice` and `speed` parameters
         voice = params["voice"]
         speed = params["speed"]
         ...
-    
+
 ```
 Then the agent can be called by simply modifying the configuration like:
 ```yaml

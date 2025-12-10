@@ -8,7 +8,7 @@ eval_prompt_template = """
 {story}
 
 ###Task Description:
-Evaluate the children story written based on the "story topic" according to the "scoring criteria". 
+Evaluate the children story written based on the "story topic" according to the "scoring criteria".
 1. Write a detailed feedback based on the given scoring criteria. Strictly evaluate the quality of the story according to the criteria, rather than giving general comments.
 2. After writing a feedback, give a score, which is an integer between 1 and 5. You should refer to the scoring criteria for scoring.
 3. The output format should be as follows: "Feedback: (evaluation based on the criteria) Score: (an integer between 1 and 5)".

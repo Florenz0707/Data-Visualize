@@ -417,30 +417,30 @@ class StoryDiffusionAgent:
             pages: List,
     ):
         num_turns = self.cfg.get("num_turns", 3)
-        
+
         # 获取LLM配置（支持新旧两种方式）
         llm_tool = self.cfg.get("llm", "qwen")
         llm_cfg = {
             "system_prompt": role_extract_system,
             "track_history": False
         }
-        
+
         # 如果配置中有llm_model_name，添加到cfg中
         if "llm_model_name" in self.cfg:
             llm_cfg["model_name"] = self.cfg["llm_model_name"]
-        
+
         role_extractor = init_tool_instance({
             "tool": llm_tool,
             "cfg": llm_cfg
         })
-        
+
         reviewer_cfg = {
             "system_prompt": role_review_system,
             "track_history": False
         }
         if "llm_model_name" in self.cfg:
             reviewer_cfg["model_name"] = self.cfg["llm_model_name"]
-        
+
         role_reviewer = init_tool_instance({
             "tool": llm_tool,
             "cfg": reviewer_cfg
@@ -470,26 +470,26 @@ class StoryDiffusionAgent:
     ):
         # 获取LLM配置（支持新旧两种方式）
         llm_tool = self.cfg.get("llm", "qwen")
-        
+
         reviewer_cfg = {
             "system_prompt": story_to_image_review_system,
             "track_history": False
         }
         if "llm_model_name" in self.cfg:
             reviewer_cfg["model_name"] = self.cfg["llm_model_name"]
-        
+
         image_prompt_reviewer = init_tool_instance({
             "tool": llm_tool,
             "cfg": reviewer_cfg
         })
-        
+
         reviser_cfg = {
             "system_prompt": story_to_image_reviser_system,
             "track_history": False
         }
         if "llm_model_name" in self.cfg:
             reviser_cfg["model_name"] = self.cfg["llm_model_name"]
-        
+
         image_prompt_reviser = init_tool_instance({
             "tool": llm_tool,
             "cfg": reviser_cfg

@@ -99,7 +99,7 @@ class MMStoryAgent:
                 for idx, prompt in enumerate(result["prompts"]):
                     if idx < len(script_data["pages"]):
                         script_data["pages"][idx]["image_prompt"] = prompt
-        
+
         with open(script_data_path, "w", encoding="utf-8") as writer:
             json.dump(script_data, writer, ensure_ascii=False, indent=4)
 

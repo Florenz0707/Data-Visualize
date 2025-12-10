@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
-import { taskApi, api } from '../lib/api'; 
+import { taskApi, api } from '../lib/api';
 import type { WorkflowStep, TaskProgress } from '../types';
 import { TaskStatusEnum } from '../types';
 import ResourceViewer, { type FetchFileFn } from '../components/ResourceViewer';
@@ -17,19 +17,19 @@ const TaskWorkspace: React.FC = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const { lastMessage, isConnected } = useWebSocket();
   const location = useLocation();
-  
+
   const [taskMode, setTaskMode] = useState<'story' | 'videogen'>('story');
-  
+
   const [workflow, setWorkflow] = useState<WorkflowStep[]>([]);
   const [progress, setProgress] = useState<TaskProgress | null>(null);
   const [viewingSegmentId, setViewingSegmentId] = useState<number | null>(null);
   const [resources, setResources] = useState<string[]>([]);
   const [resourceLoading, setResourceLoading] = useState(false);
-  const [isLoadingProgress, setIsLoadingProgress] = useState(true); 
+  const [isLoadingProgress, setIsLoadingProgress] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
-  
+
   const [isAutoRun, setIsAutoRun] = useState(false);
-  
+
   const [processingStepId, setProcessingStepId] = useState<number | null>(() => {
     if (!taskId) return null;
     const saved = localStorage.getItem(`processing_${taskId}`);
@@ -45,14 +45,14 @@ const TaskWorkspace: React.FC = () => {
       }
     }
   }, [processingStepId, taskId]);
-  
+
   const timerRef = useRef<number | undefined>(undefined);
   const autoStartTriggeredRef = useRef(false);
   const lastProcessedMessageRef = useRef<any>(null);
 
   const resourcesCache = useRef<Map<number, string[]>>(new Map());
   const fileCache = useRef<Map<string, { data: any, type: 'blob' | 'json' }>>(new Map());
-  
+
   const viewingSegmentIdRef = useRef<number | null>(null);
   useEffect(() => { viewingSegmentIdRef.current = viewingSegmentId; }, [viewingSegmentId]);
 
@@ -66,7 +66,7 @@ const TaskWorkspace: React.FC = () => {
       const cached = fileCache.current.get(url);
       if (cached?.type === type) {
         if (onProgress) onProgress(100);
-        return Promise.resolve(cached.data); 
+        return Promise.resolve(cached.data);
       }
     }
 
@@ -113,7 +113,7 @@ const TaskWorkspace: React.FC = () => {
     try {
       const { data } = await taskApi.getProgress(taskId);
       setProgress(data);
-      
+
       setProcessingStepId(prev => {
         if (prev !== null) {
           if (data.status === TaskStatusEnum.COMPLETED || data.status === TaskStatusEnum.FAILED) {
@@ -122,7 +122,7 @@ const TaskWorkspace: React.FC = () => {
         }
         return prev;
       });
-      
+
       if (data.segment_names && (workflow.length === 0 || data.workflow_version !== (taskMode === 'story' ? 'default' : 'videogen'))) {
         const steps = data.segment_names.map((name, index) => ({
           id: index + 1,
@@ -131,13 +131,13 @@ const TaskWorkspace: React.FC = () => {
         setWorkflow(steps);
         const mode = data.workflow_version === 'videogen' ? 'videogen' : 'story';
         setTaskMode(mode);
-        
+
         setViewingSegmentId(prev => {
             if (prev) return prev;
             const current = data.current_segment;
             const status = data.status;
             if (status === TaskStatusEnum.RUNNING) return current + 1;
-            return Math.min(current + 1, steps.length); 
+            return Math.min(current + 1, steps.length);
         });
         setIsInitialized(true);
       }
@@ -177,9 +177,9 @@ const TaskWorkspace: React.FC = () => {
     if (viewingSegmentIdRef.current === segId) {
       setResourceLoading(true);
     }
-    
+
     const urls = await fetchSegmentResources(segId);
-    
+
     if (viewingSegmentIdRef.current === segId) {
       setResources(urls);
       setResourceLoading(false);
@@ -195,23 +195,23 @@ const TaskWorkspace: React.FC = () => {
         resourcesCache.current.delete(segId);
         fileCache.current.clear();
       }
-      
+
       setProgress(prev => prev ? ({ ...prev, status: TaskStatusEnum.RUNNING }) : null);
       await taskApi.execute(taskId, segId, redo);
-      
+
       setTimeout(fetchProgress, 1000);
-      
+
     } catch (e) {
       console.error("Execute failed", e);
       alert("Request failed");
       setProcessingStepId(null);
-      fetchProgress(); 
+      fetchProgress();
     }
   };
 
   useEffect(() => {
     if (!lastMessage || !taskId) return;
-    
+
     if (lastMessage === lastProcessedMessageRef.current) return;
     lastProcessedMessageRef.current = lastMessage;
 
@@ -222,7 +222,7 @@ const TaskWorkspace: React.FC = () => {
 
       if (lastMessage.type === 'segment_finished') {
         resourcesCache.current.delete(lastMessage.segment_id);
-        fileCache.current.clear(); 
+        fileCache.current.clear();
 
         setProgress(prev => {
             if (!prev) return null;
@@ -235,9 +235,9 @@ const TaskWorkspace: React.FC = () => {
         });
 
         setTimeout(() => fetchProgress(), 500);
-        
+
         if (lastMessage.segment_id === viewingSegmentId) {
-          loadResources(viewingSegmentId, true); 
+          loadResources(viewingSegmentId, true);
         }
 
         if (isAutoRun) {
@@ -259,7 +259,7 @@ const TaskWorkspace: React.FC = () => {
   useEffect(() => {
     if (!taskId || !viewingSegmentId) return;
     const completedSegId = getCompletedSegId(progress);
-    
+
     if (viewingSegmentId <= completedSegId) {
        if (!resourcesCache.current.has(viewingSegmentId)) {
          setResources([]);
@@ -273,7 +273,7 @@ const TaskWorkspace: React.FC = () => {
   const handleExecuteClick = (redo: boolean = false) => {
     if (viewingSegmentId) executeStep(viewingSegmentId, redo);
   };
-  
+
   const handleResourceUpdate = () => {
     clearCaches();
     fetchProgress();
@@ -282,15 +282,15 @@ const TaskWorkspace: React.FC = () => {
 
   useEffect(() => {
     const shouldAutoStart = location.state?.autoStart;
-    
+
     if (shouldAutoStart && !autoStartTriggeredRef.current && isInitialized && progress && workflow.length > 0) {
         const completedSegId = getCompletedSegId(progress);
         const isPending = progress.status === TaskStatusEnum.PENDING;
-        
+
         if (completedSegId === 0 && isPending) {
             autoStartTriggeredRef.current = true;
             setIsAutoRun(true);
-            
+
             const firstStepId = workflow[0].id;
             setViewingSegmentId(firstStepId);
             executeStep(firstStepId, false);
@@ -309,7 +309,7 @@ const TaskWorkspace: React.FC = () => {
   const taskStatus = progress?.status;
 
   const nextStepId = completedSegId + 1;
-  
+
   const isStepProcessing = (stepId: number) => stepId === processingStepId;
 
   let displayStatus = 'UNKNOWN';
@@ -318,7 +318,7 @@ const TaskWorkspace: React.FC = () => {
   } else if (processingStepId !== null) {
     displayStatus = 'RUNNING';
   } else if (taskStatus === TaskStatusEnum.RUNNING) {
-    displayStatus = 'PENDING'; 
+    displayStatus = 'PENDING';
   } else {
     displayStatus = taskStatus?.toUpperCase() || 'UNKNOWN';
   }
@@ -336,30 +336,30 @@ const TaskWorkspace: React.FC = () => {
             </h2>
           </div>
           <div className="text-xs text-gray-400 font-mono mb-2">{taskId}</div>
-          
+
           <div className="flex flex-col gap-2 mt-2">
              <div className={`px-2 py-0.5 text-xs rounded-full border text-center ${
-              displayStatus === 'RUNNING' ? 'bg-blue-50 border-blue-200 text-blue-700' : 
-              displayStatus === 'COMPLETED' ? 'bg-green-50 border-green-200 text-green-700' : 
-              displayStatus === 'FAILED' ? 'bg-red-50 border-red-200 text-red-700' : 
-              displayStatus === 'DELETED' ? 'bg-gray-200 border-gray-300 text-gray-600' : 
+              displayStatus === 'RUNNING' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+              displayStatus === 'COMPLETED' ? 'bg-green-50 border-green-200 text-green-700' :
+              displayStatus === 'FAILED' ? 'bg-red-50 border-red-200 text-red-700' :
+              displayStatus === 'DELETED' ? 'bg-gray-200 border-gray-300 text-gray-600' :
               'bg-gray-100 border-gray-200'
             }`}>
               {displayStatus}
             </div>
-            
+
             <div className="flex justify-between items-center px-1">
                 <div className="flex items-center gap-1 text-xs text-gray-500">
                     <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-400'}`}></div>
                     <span>{isConnected ? 'WS Connected' : 'WS Disconnected'}</span>
                 </div>
-                
+
                 <label className="flex items-center gap-1 cursor-pointer" title="当前步骤完成后自动执行下一步">
-                    <input 
-                        type="checkbox" 
-                        className="w-3 h-3" 
-                        checked={isAutoRun} 
-                        onChange={(e) => setIsAutoRun(e.target.checked)} 
+                    <input
+                        type="checkbox"
+                        className="w-3 h-3"
+                        checked={isAutoRun}
+                        onChange={(e) => setIsAutoRun(e.target.checked)}
                     />
                     <span className="text-xs font-medium text-gray-600">自动执行</span>
                 </label>
@@ -373,7 +373,7 @@ const TaskWorkspace: React.FC = () => {
             const isActive = viewingSegmentId === step.id;
             const isCompleted = step.id <= completedSegId;
             const isRunning = isStepProcessing(step.id);
-            
+
             return (
               <button
                 key={step.id}
@@ -400,17 +400,17 @@ const TaskWorkspace: React.FC = () => {
           <h3 className="font-bold text-xl text-gray-800">
             {workflow.find(w => w.id === viewingSegmentId)?.name || '...'}
           </h3>
-          
+
           <div className="space-x-3">
             {viewingSegmentId === nextStepId && processingStepId === null && (
-              <button 
+              <button
                 onClick={() => handleExecuteClick(false)}
                 className="bg-blue-600 text-white px-6 py-2 rounded-full shadow hover:bg-blue-700 active:scale-95 transition font-medium"
               >
                 开始生成
               </button>
             )}
-            
+
             {viewingSegmentId === nextStepId && processingStepId === nextStepId && (
               <button disabled className="bg-gray-100 text-gray-400 border border-gray-200 px-6 py-2 rounded-full cursor-not-allowed flex items-center gap-2">
                 <Spinner />
@@ -419,14 +419,14 @@ const TaskWorkspace: React.FC = () => {
             )}
 
             {viewingSegmentId !== null && viewingSegmentId <= completedSegId && processingStepId === null && (
-              <button 
+              <button
                 onClick={() => handleExecuteClick(true)}
                 className="text-orange-600 border border-orange-200 bg-orange-50 px-4 py-2 rounded-full hover:bg-orange-100 transition text-sm font-medium"
               >
                 重新生成此步骤
               </button>
             )}
-            
+
             {viewingSegmentId !== null && viewingSegmentId <= completedSegId && processingStepId === viewingSegmentId && (
                <button disabled className="bg-gray-100 text-gray-400 border border-gray-200 px-6 py-2 rounded-full cursor-not-allowed flex items-center gap-2">
                 <Spinner />
@@ -444,16 +444,16 @@ const TaskWorkspace: React.FC = () => {
             </div>
           ) : (
             viewingSegmentId && (
-              <ResourceViewer 
-                key={viewingSegmentId} 
-                taskId={taskId} 
-                segmentId={viewingSegmentId} 
-                urls={resources} 
+              <ResourceViewer
+                key={viewingSegmentId}
+                taskId={taskId}
+                segmentId={viewingSegmentId}
+                urls={resources}
                 taskMode={taskMode}
                 completedSegId={completedSegId}
-                onResourceUpdate={handleResourceUpdate} 
+                onResourceUpdate={handleResourceUpdate}
                 fetchFile={fetchFile}
-                fetchSegmentResources={fetchSegmentResources} 
+                fetchSegmentResources={fetchSegmentResources}
               />
             )
           )}

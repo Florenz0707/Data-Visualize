@@ -766,5 +766,5 @@ class SlideshowVideoComposeAgent:
             return str(output)
         finally:
             try: shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception: 
+            except Exception:
                 pass

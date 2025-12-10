@@ -39,7 +39,7 @@ class QAOutlineStoryWriter:
         self.llm_type = cfg.get("llm", "qwen")
 
     def generate_outline(self, params):
-        # `params`: story setting like 
+        # `params`: story setting like
         # {
         #     "story_title": "xxx",
         #     "main_role": "xxx",

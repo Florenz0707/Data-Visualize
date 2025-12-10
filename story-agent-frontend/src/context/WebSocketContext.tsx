@@ -14,7 +14,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [lastMessage, setLastMessage] = useState<WSMessage | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  
+
   const reconnectTimeoutRef = useRef<number | undefined>(undefined);
 
   const connect = () => {
@@ -22,7 +22,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (!token) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host; 
+    const host = window.location.host;
     const wsUrl = `${protocol}//${host}/ws/notifications?token=${token}`;
 
     const ws = new WebSocket(wsUrl);

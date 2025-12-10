@@ -6,13 +6,13 @@ export type FetchFileFn = (url: string, type: 'blob' | 'json', onProgress?: (per
 export type FetchSegmentResourcesFn = (segId: number) => Promise<string[]>;
 
 interface Props {
-  taskId: string; 
+  taskId: string;
   segmentId: number;
   urls: string[];
   taskMode?: 'story' | 'videogen';
   completedSegId: number;
-  onResourceUpdate?: () => void; 
-  fetchFile: FetchFileFn; 
+  onResourceUpdate?: () => void;
+  fetchFile: FetchFileFn;
   fetchSegmentResources?: FetchSegmentResourcesFn;
 }
 
@@ -33,14 +33,14 @@ function isStoryData(data: any): data is StoryData {
 const useSecureResource = (url: string, fetchFile: FetchFileFn) => {
   const [objectUrl, setObjectUrl] = useState<string>('');
   const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState(0); 
-  const [error, setError] = useState<string | null>(null); 
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
     mounted.current = true;
     let currentUrl = '';
-    
+
     const fetchResource = async () => {
       try {
         setLoading(true);
@@ -70,10 +70,10 @@ const useSecureResource = (url: string, fetchFile: FetchFileFn) => {
     };
 
     if (url) fetchResource();
-    
-    return () => { 
-      mounted.current = false; 
-      if (currentUrl) URL.revokeObjectURL(currentUrl); 
+
+    return () => {
+      mounted.current = false;
+      if (currentUrl) URL.revokeObjectURL(currentUrl);
     };
   }, [url, fetchFile]);
 
@@ -123,10 +123,10 @@ const SecureVideo: React.FC<{ src: string; fetchFile: FetchFileFn }> = ({ src, f
   );
 
   return (
-    <video 
-      controls 
-      className="w-full rounded-lg shadow-xl bg-black aspect-video" 
-      src={objectUrl} 
+    <video
+      controls
+      className="w-full rounded-lg shadow-xl bg-black aspect-video"
+      src={objectUrl}
       playsInline
     >
       您的浏览器不支持视频播放
@@ -138,9 +138,9 @@ interface StoryboardProps {
   data: StoryData;
   mode: 'read' | 'edit-story' | 'edit-split' | 'speech';
   onSave?: (newData: StoryData) => Promise<void>;
-  audioUrls?: string[]; 
+  audioUrls?: string[];
   imageUrls?: string[];
-  fetchFile: FetchFileFn; 
+  fetchFile: FetchFileFn;
 }
 
 const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audioUrls, imageUrls, fetchFile }) => {
@@ -186,8 +186,8 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
               {mode === 'edit-story' ? '编辑故事内容' : '编辑分镜脚本'}
             </span>
           </div>
-          <button 
-            onClick={handleSave} 
+          <button
+            onClick={handleSave}
             disabled={isSaving}
             className="bg-blue-600 text-white px-6 py-2 rounded-lg shadow-md hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center gap-2 font-medium text-sm"
           >
@@ -239,7 +239,7 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
                       <h4 className="text-xs font-bold text-purple-600 uppercase tracking-wider mb-3 flex items-center gap-2 shrink-0">
                         <span>🎨</span> Image Prompt
                       </h4>
-                      
+
                       {page.image_prompt ? (
                         <p className="text-gray-600 text-sm italic leading-relaxed mb-4">
                           {page.image_prompt}
@@ -291,7 +291,7 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
                               const segNum = i + 1;
                               const audioKey = `${sceneNum}_${segNum}`;
                               const audioUrl = mode === 'speech' ? audioMap.get(audioKey) : null;
-                              
+
                               return (
                                 <li key={i} className="text-sm text-gray-700 bg-white/50 p-2 rounded border border-green-100/50">
                                   <div className="flex items-start gap-2">
@@ -319,15 +319,15 @@ const StoryboardViewer: React.FC<StoryboardProps> = ({ data, mode, onSave, audio
   );
 };
 
-const ResourceViewer: React.FC<Props> = ({ 
-  taskId, 
-  segmentId, 
-  urls, 
-  taskMode = 'story', 
-  onResourceUpdate, 
-  fetchFile, 
+const ResourceViewer: React.FC<Props> = ({
+  taskId,
+  segmentId,
+  urls,
+  taskMode = 'story',
+  onResourceUpdate,
+  fetchFile,
   fetchSegmentResources,
-  completedSegId 
+  completedSegId
 }) => {
   const [jsonContent, setJsonContent] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -338,16 +338,16 @@ const ResourceViewer: React.FC<Props> = ({
   useEffect(() => {
     let active = true;
     setLoadError(null);
-    
+
     // @ts-ignore
     const type = taskMode === 'videogen' ? VIDEOGEN_SEGMENT_TYPE_MAP[segmentId] : SEGMENT_TYPE_MAP[segmentId];
-    
+
     if (type === 'story_json' || type === 'split_json') {
       if (urls[0]) {
         setLoading(true);
         fetchFile(urls[0], 'json')
           .then(data => { if (active) setJsonContent(data); })
-          .catch(err => { 
+          .catch(err => {
             console.error(err);
             if (active) setLoadError("加载故事脚本失败");
           })
@@ -383,7 +383,7 @@ const ResourceViewer: React.FC<Props> = ({
     } else {
       if (active) setImages([]);
     }
-    
+
     if (!['story_json', 'split_json', 'audio'].includes(type)) {
       setLoading(false);
     }
@@ -415,7 +415,7 @@ const ResourceViewer: React.FC<Props> = ({
   const type = taskMode === 'videogen' ? (VIDEOGEN_SEGMENT_TYPE_MAP[segmentId] || 'unknown') : SEGMENT_TYPE_MAP[segmentId];
 
   if (loading) return <div className="p-10 text-center text-gray-400">加载资源中...</div>;
-  
+
   if (loadError) return <div className="p-8 text-center text-red-400">{loadError}</div>;
 
   if (type === 'story_json') {
@@ -448,7 +448,7 @@ const ResourceViewer: React.FC<Props> = ({
       {type === 'video' && (
         <div className="space-y-4">{urls.map((url, i) => <SecureVideo key={i} src={url} fetchFile={fetchFile} />)}</div>
       )}
-      
+
       {![ 'story_json', 'split_json', 'audio', 'image', 'video'].includes(type) && (
         <div>未知资源类型: {type}</div>
       )}

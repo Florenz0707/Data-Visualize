@@ -6,12 +6,12 @@ import { useAuth } from '../context/AuthContext';
 const Dashboard: React.FC = () => {
   const [tasks, setTasks] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
-  
+
   const [newTopic, setNewTopic] = useState('');
   const [role, setRole] = useState('');
   const [scene, setScene] = useState('');
   const [description, setDescription] = useState('');
-  
+
   const [taskMode, setTaskMode] = useState<'story' | 'videogen'>('story');
 
   const { logout } = useAuth();
@@ -43,7 +43,7 @@ const Dashboard: React.FC = () => {
 
       const { data } = await taskApi.create(payload);
       setShowModal(false);
-      
+
       setNewTopic('');
       setRole('');
       setScene('');
@@ -59,7 +59,7 @@ const Dashboard: React.FC = () => {
   const handleDelete = async (e: React.MouseEvent, taskId: string) => {
     e.preventDefault();
     if (!window.confirm('确定要删除这个任务吗？此操作不可恢复。')) return;
-    
+
     try {
       await taskApi.delete(taskId);
       setTasks(prev => prev.filter(id => id !== taskId));
@@ -78,7 +78,7 @@ const Dashboard: React.FC = () => {
       <main className="container mx-auto p-6">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-lg font-semibold text-gray-700">任务列表</h2>
-          <button 
+          <button
             onClick={() => setShowModal(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition flex items-center gap-2"
           >
@@ -92,7 +92,7 @@ const Dashboard: React.FC = () => {
               <div className="bg-white p-6 rounded-lg shadow-sm hover:shadow-md transition border border-gray-200 group-hover:border-blue-300">
                 <div className="flex justify-between items-start mb-2">
                     <div className="font-mono text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">ID: {taskId}</div>
-                    <button 
+                    <button
                         onClick={(e) => handleDelete(e, taskId)}
                         className="text-gray-300 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition z-10"
                         title="删除任务"
@@ -122,16 +122,16 @@ const Dashboard: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg w-96 shadow-xl transform transition-all">
             <h3 className="text-lg font-bold mb-4 text-gray-800">新建任务</h3>
-            
+
             {/* 模式切换 Tabs */}
             <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
-              <button 
+              <button
                 onClick={() => setTaskMode('story')}
                 className={`flex-1 py-1.5 text-sm font-medium rounded-md transition ${taskMode === 'story' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 多模态故事
               </button>
-              <button 
+              <button
                 onClick={() => setTaskMode('videogen')}
                 className={`flex-1 py-1.5 text-sm font-medium rounded-md transition ${taskMode === 'videogen' ? 'bg-white shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
               >
@@ -140,30 +140,30 @@ const Dashboard: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-              <input 
-                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" 
-                placeholder={taskMode === 'story' ? "主题 (必填)" : "Prompt 提示词 (必填)"} 
-                value={newTopic} 
-                onChange={e => setNewTopic(e.target.value)} 
+              <input
+                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                placeholder={taskMode === 'story' ? "主题 (必填)" : "Prompt 提示词 (必填)"}
+                value={newTopic}
+                onChange={e => setNewTopic(e.target.value)}
               />
-              <input 
-                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" 
-                placeholder="主角 (选填)" 
-                value={role} 
-                onChange={e => setRole(e.target.value)} 
+              <input
+                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                placeholder="主角 (选填)"
+                value={role}
+                onChange={e => setRole(e.target.value)}
               />
-              <input 
-                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none" 
-                placeholder="场景 (选填)" 
-                value={scene} 
-                onChange={e => setScene(e.target.value)} 
+              <input
+                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+                placeholder="场景 (选填)"
+                value={scene}
+                onChange={e => setScene(e.target.value)}
               />
-              <textarea 
-                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none" 
-                placeholder="详细描述 (选填)" 
+              <textarea
+                className="w-full border border-gray-300 p-2 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
+                placeholder="详细描述 (选填)"
                 value={description}
                 rows={3}
-                onChange={e => setDescription(e.target.value)} 
+                onChange={e => setDescription(e.target.value)}
               />
             </div>
             <div className="flex justify-end gap-2 mt-6">

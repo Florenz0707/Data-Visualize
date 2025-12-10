@@ -19,20 +19,20 @@ def load_env(env_path: Path = Path("configs/.env")):
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
-                
+
                 # 分割键值对
                 if '=' not in line:
                     continue
-                
+
                 key, value = line.split('=', 1)
                 key = key.strip()
                 value = value.strip()
-                
+
                 # 去除值的引号（单引号或双引号）
                 if (value.startswith('"') and value.endswith('"')) or \
                    (value.startswith("'") and value.endswith("'")):
                     value = value[1:-1]
-                
+
                 # 如果环境变量未设置，则设置它
                 if key not in os.environ:
                     os.environ[key] = value
@@ -41,4 +41,3 @@ def load_env(env_path: Path = Path("configs/.env")):
                     # print(f"  - Env var '{key}' already set, skipping.") # 取消注释以进行调试
     except Exception as e:
         print(f"✗ Error loading .env file: {e}")
-
